@@ -39,10 +39,25 @@ MODEL_NAME = "trmteb/turkish-embedding-model"
 model = SentenceTransformer(MODEL_NAME, device="cuda")
 
 # %%
-# --- Select only the Turkish Classification tasks (not the full benchmark) ---
+# --- Select only the 8 Turkish-only Classification tasks ---
+# (mteb.get_tasks(languages=["tur"]) would also pull in multilingual tasks
+# like MassiveIntentClassification that merely include a Turkish subset
+# among dozens of others — we only want the Turkish-specific ones, matching
+# https://huggingface.co/spaces/magibu/mteb-turkish)
 import mteb
 
-tasks = mteb.get_tasks(task_types=["Classification"], languages=["tur"])
+TURKISH_CLASSIFICATION_TASKS = [
+    "THYSentimentClassification",
+    "TSTimelineNewsCategoryClassification",
+    "Turkish75NewsClassification",
+    "TurkishIronyClassification",
+    "TurkishMovieSentimentClassification",
+    "TurkishNewsCategoryClassification",
+    "TurkishOffensiveLanguageClassification",
+    "TurkishProductSentimentClassification",
+]
+
+tasks = mteb.get_tasks(tasks=TURKISH_CLASSIFICATION_TASKS)
 print(f"Selected {len(tasks)} tasks:")
 for task in tasks:
     print(" -", task.metadata.name)
