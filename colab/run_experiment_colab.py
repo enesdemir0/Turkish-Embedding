@@ -6,8 +6,13 @@
 # Usage in Google Colab (A100 GPU runtime):
 #   !git clone https://github.com/enesdemir0/Turkish-Embedding.git
 #   %cd Turkish-Embedding
-#   Add a Colab secret named DAGSHUB_USER_TOKEN (recommended), set CONFIG_PATH below,
-#   then run all cells.
+#   Add Colab secrets DAGSHUB_USER_TOKEN and HF_TOKEN (left sidebar -> key icon),
+#   set CONFIG_PATH below, then run all cells.
+#
+# HF_TOKEN needs read access to google/embeddinggemma-300m specifically — that repo
+# is gated, so visit https://huggingface.co/google/embeddinggemma-300m while logged
+# in and accept the license BEFORE running this, or the clone step will fail with a
+# GatedRepoError regardless of the token being valid.
 
 # %%
 CONFIG_PATH = "configs/experiments/exp001_mean_composition_cosine.yaml"  # <- only thing to change per run
@@ -30,19 +35,29 @@ assert torch.cuda.is_available(), "No GPU detected — Runtime > Change runtime 
 print("GPU:", torch.cuda.get_device_name(0))
 
 # %%
-# --- DagsHub token: prefer Colab secrets over pasting it into this file ---
+# --- Tokens: prefer Colab secrets over pasting them into this file ---
 import os
 
-try:
-    from google.colab import userdata  # type: ignore
 
-    os.environ["DAGSHUB_USER_TOKEN"] = userdata.get("DAGSHUB_USER_TOKEN")
-except Exception:
-    if "DAGSHUB_USER_TOKEN" not in os.environ:
-        raise RuntimeError(
-            "Set a Colab secret named DAGSHUB_USER_TOKEN (left sidebar -> key icon), "
-            "or set os.environ['DAGSHUB_USER_TOKEN'] manually before continuing."
-        )
+def _load_secret(name: str) -> None:
+    try:
+        from google.colab import userdata  # type: ignore
+
+        os.environ[name] = userdata.get(name)
+    except Exception:
+        if name not in os.environ:
+            raise RuntimeError(
+                f"Set a Colab secret named {name} (left sidebar -> key icon), "
+                f"or set os.environ['{name}'] manually before continuing."
+            )
+
+
+_load_secret("DAGSHUB_USER_TOKEN")
+_load_secret("HF_TOKEN")  # needs read access to google/embeddinggemma-300m (gated — accept its license first)
+
+from huggingface_hub import login as hf_login
+
+hf_login(token=os.environ["HF_TOKEN"])
 
 # %%
 # --- Run the experiment ---

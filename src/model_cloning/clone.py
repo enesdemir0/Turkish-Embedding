@@ -21,9 +21,67 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from contextlib import contextmanager
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _fast_build_token_id_map(self, batch_size: int = 5000, verbose: bool = True) -> dict[int, list[int]]:
+    """Drop-in replacement for TransformerCloner.build_token_id_map (confirmed by
+    reading the installed source, v0.2.10) that fixes a real O(n^2) performance bug:
+    the original does `self.target_tokenizer.vocab[vocab]` *inside* the per-token
+    loop. For a fast HF tokenizer, `.vocab` rebuilds its entire vocabulary dict from
+    the Rust backend on every access — so for a 131K-token vocabulary, that's a
+    131K-entry dict rebuilt 131,073 times (once per token) instead of once. That's
+    what turns a step that should take seconds into multiple hours. Everything else
+    here is unchanged from the original (same batching, same prints, same return
+    value) — the only change is caching target_vocab once, outside the loop.
+    """
+    target_vocab = self.target_tokenizer.vocab
+    target_vocab_keys = list(target_vocab.keys())
+    total_tokens = len(target_vocab_keys)
+
+    if verbose:
+        print(f"Building token ID map for {total_tokens} tokens...")
+
+    self.token_id_map = {}
+
+    for batch_start in range(0, total_tokens, batch_size):
+        batch_end = min(batch_start + batch_size, total_tokens)
+        batch_tokens = target_vocab_keys[batch_start:batch_end]
+
+        batch_encoded = self.org_tokenizer(
+            batch_tokens,
+            add_special_tokens=True,
+            padding=False,
+            truncation=False,
+        )
+
+        for i, vocab_token in enumerate(batch_tokens):
+            target_id = target_vocab[vocab_token]
+            source_ids = batch_encoded["input_ids"][i][1:]
+            self.token_id_map[target_id] = source_ids
+
+        if verbose:
+            print(f"Processed {batch_end}/{total_tokens} tokens")
+
+    if verbose:
+        print(f"Token ID map built with {len(self.token_id_map)} entries")
+
+    return self.token_id_map
+
+
+@contextmanager
+def _patch_slow_vocab_lookup():
+    from transformer_cloner.cloner import TransformerCloner
+
+    original = TransformerCloner.build_token_id_map
+    TransformerCloner.build_token_id_map = _fast_build_token_id_map
+    try:
+        yield
+    finally:
+        TransformerCloner.build_token_id_map = original
 
 
 def clone_model(
@@ -48,7 +106,8 @@ def clone_model(
     from transformer_cloner import SentenceTransformerCloner
 
     cloner = SentenceTransformerCloner(model_path=teacher_model, target_tokenizer_id=target_tokenizer)
-    cloner.clone(verbose=True)
+    with _patch_slow_vocab_lookup():
+        cloner.clone(verbose=True)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         cloner.save(tmp_dir)
