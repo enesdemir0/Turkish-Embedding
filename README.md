@@ -58,10 +58,16 @@ python scripts/run_experiment.py --config configs/experiments/exp001_mean_compos
 
 ## Status
 
-- [x] Step 1 — tracking/config plumbing, pipeline skeleton (this commit)
-- [ ] Step 2 — tokenizer surgery (`frequency_pruning`)
-- [ ] Step 3 — model cloning + `mean_composition` embedding init
-- [ ] Step 4 — `cosine` distillation objective + teacher-embeddings data loader
-- [ ] Step 5 — `mteb_tr` evaluation runner (replaces `benchmark_classification_colab.py`)
-- [ ] Step 6 — `exp001` run: exact paper reproduction, verified against published STSbTR
-      numbers (Pearson 0.8199 / Spearman 0.7980)
+- [x] Step 1 — tracking/config plumbing, pipeline skeleton
+- [x] Step 2 (partial) — `reuse_pretrained` tokenizer strategy (loads the paper's
+      published tokenizer); from-scratch `frequency_pruning` still pending, later work
+- [x] Step 3 — model cloning (`transformer_cloner.SentenceTransformerCloner`) +
+      `mean_composition` embedding init
+- [x] Step 4 — `cosine` distillation objective (`distil-trainer`, with a patched
+      cosine LR schedule + MLflow loss-curve forwarding) + teacher-embeddings loader
+- [x] Step 5 — `mteb_tr_runner` evaluation (`mteb.get_benchmark("MTEB(Turkish)")`),
+      replacing `benchmark_classification_colab.py`
+- [x] Step 6 — `exp001` config assembled (`configs/experiments/exp001_mean_composition_cosine.yaml`);
+      **not yet actually run** — first real execution happens on Colab
+      (`colab/run_experiment_colab.py`), verified against published STSbTR numbers
+      (Pearson 0.8199 / Spearman 0.7980)

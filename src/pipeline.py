@@ -82,7 +82,7 @@ class Pipeline:
                 cfg.distillation.strategy,
                 cfg.distillation.params,
             )
-            trained_model = distillation_strategy.train(model)
+            trained_model = distillation_strategy.train(model, tracker=self.tracker)
 
             logger.info("Stage 4/4: evaluation")
             from src.evaluation.mteb_tr_runner import run_evaluation  # deferred: heavy deps

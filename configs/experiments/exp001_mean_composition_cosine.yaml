@@ -1,0 +1,55 @@
+# exp001 — exact paper reproduction (arXiv:2605.29992): mean-composition embedding
+# init + cosine distillation. See README.md for the naming/tracking convention.
+#
+# Uses the paper's own already-published tokenizer (reuse_pretrained) rather than
+# re-training one from scratch, so this run isolates itself to the parts actually
+# being tested — weight-preserving cloning, mean-composition init, and cosine
+# distillation — rather than also introducing a second source of divergence from
+# the paper (a from-scratch tokenizer built on a possibly-different corpus
+# snapshot). Building a genuinely new tokenizer is later work (frequency_pruning).
+
+experiment:
+  number: 1
+  description: >
+    Exact reproduction of embeddingmagibu-200m: mean-composition embedding init
+    (transformer-cloner's native EmbeddingStrategy.MEAN) + cosine distillation
+    (distil-trainer, paper's exact hyperparameters), using the paper's own
+    published tokenizer rather than a from-scratch rebuild.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192  # paper §4.1: 4x the teacher's native 2048
+
+distillation:
+  strategy: cosine
+  params:
+    # dataset_repo defaults to alibayram/wikipedia-40-langs-with-embeddings
+    # (already quota-shaped: 580K rows, confirmed via schema check — see
+    # src/data/teacher_embeddings.py). All hyperparameters below default to the
+    # paper's exact published values (src/distillation/cosine_distillation.py's
+    # PAPER_HYPERPARAMETERS) — left unset here on purpose, so this config makes
+    # zero silent deviations from the paper visible as "nothing overridden".
+    output_dir: ./distilled_model/exp001
+
+evaluation:
+  # benchmark_name defaults to "MTEB(Turkish)" (mteb's own maintained Turkish
+  # benchmark — same one mteb_tr's own CLI uses) — the full task suite, not just
+  # the 8 Classification tasks benchmark_classification_colab.py used.
+  output_folder: results/exp001
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp001_embeddinggemma300m_reuse_pretrained_mean_composition_cosine
+  tags:
+    purpose: paper_reproduction
