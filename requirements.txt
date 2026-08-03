@@ -1,0 +1,14 @@
+# Tracking / config plumbing (Step 1) — lightweight, needed everywhere
+dagshub
+mlflow
+pyyaml
+
+# Model construction pipeline (Steps 2-4) — heavy, only needed where training actually runs (Colab A100)
+sentence-transformers
+datasets
+sentencepiece
+transformer-cloner
+distil-trainer
+
+# Evaluation (Step 5)
+git+https://github.com/selmanbaysan/mteb_tr.git
