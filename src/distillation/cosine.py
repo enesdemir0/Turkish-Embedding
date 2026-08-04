@@ -8,7 +8,7 @@ text_column="text", final_embedding_column="teacher_embedding_final",
 weight_decay=0.01, max_grad_norm=1.0) — confirmed by reading the installed
 package's real source (v0.1.27), not assumed from documentation.
 
-Two things needed a deliberate fix rather than a plain config pass-through, both
+Three things needed a deliberate fix rather than a plain config pass-through, all
 found the same way (reading the source, not guessing):
 
 1. Its LR scheduler is hardcoded to "linear" with no config option — the paper
@@ -21,6 +21,13 @@ found the same way (reading the source, not guessing):
    to our tracker — giving a real loss curve to compare against the paper's
    reported trajectory (~0.09 -> ~0.07 within 200 steps -> ~0.05 by epoch end),
    rather than only the final summary dict `.train()` returns.
+3. `_forward_with_gradients`/`_forward_pre_dense` do `v.to(self.device) for k, v in
+   features.items()` over every key in the tokenizer's output unconditionally.
+   Newer sentence-transformers (5.x, confirmed against the installed 5.6.1) added a
+   `"modality"` key to that output (a plain string, for multi-modal support) — so
+   `.to()` on a `str` crashes with `AttributeError: 'str' object has no attribute
+   'to'`. `_patch_device_transfer` replaces both methods with a version that only
+   calls `.to()` on values that actually have it.
 """
 
 from __future__ import annotations
@@ -85,6 +92,63 @@ def _force_cosine_lr_schedule():
         yield
 
 
+def _forward_with_gradients(self, texts: list[str]):
+    """Drop-in replacement for EmbeddingDistillationTrainer._forward_with_gradients
+    (confirmed against the installed source, v0.1.27) — identical except the device
+    transfer only touches values that are actually tensors (see module docstring,
+    point 3)."""
+    model = self._original_model
+    features = model.tokenize(texts)
+    features = {k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in features.items()}
+
+    for module in model:
+        features = module(features)
+
+    embedding = features.get("sentence_embedding")
+    if embedding is None:
+        embedding = features.get("token_embeddings")
+        if embedding is not None and len(embedding.shape) == 3:
+            embedding = embedding.mean(dim=1)
+
+    return embedding
+
+
+def _forward_pre_dense(self, texts: list[str]):
+    """Drop-in replacement for EmbeddingDistillationTrainer._forward_pre_dense —
+    same fix as _forward_with_gradients above."""
+    model = self._original_model
+    pre_dense_idx = self._get_pre_dense_index()
+
+    features = model.tokenize(texts)
+    features = {k: (v.to(self.device) if hasattr(v, "to") else v) for k, v in features.items()}
+
+    for idx in range(pre_dense_idx):
+        features = model[idx](features)
+
+    embedding = features.get("sentence_embedding")
+    if embedding is None:
+        embedding = features.get("token_embeddings")
+        if embedding is not None and len(embedding.shape) == 3:
+            embedding = embedding.mean(dim=1)
+
+    return embedding
+
+
+@contextmanager
+def _patch_device_transfer():
+    from distil_trainer.core.embedding_trainer import EmbeddingDistillationTrainer
+
+    original_gradients = EmbeddingDistillationTrainer._forward_with_gradients
+    original_pre_dense = EmbeddingDistillationTrainer._forward_pre_dense
+    EmbeddingDistillationTrainer._forward_with_gradients = _forward_with_gradients
+    EmbeddingDistillationTrainer._forward_pre_dense = _forward_pre_dense
+    try:
+        yield
+    finally:
+        EmbeddingDistillationTrainer._forward_with_gradients = original_gradients
+        EmbeddingDistillationTrainer._forward_pre_dense = original_pre_dense
+
+
 @contextmanager
 def _log_loss_to_tracker(tracker: Any | None):
     if tracker is None:
@@ -142,7 +206,7 @@ class CosineDistillationObjective(DistillationObjective):
 
             dataset = load_teacher_embeddings_dataset(dataset_repo)
 
-            with _force_cosine_lr_schedule(), _log_loss_to_tracker(tracker):
+            with _force_cosine_lr_schedule(), _patch_device_transfer(), _log_loss_to_tracker(tracker):
                 metrics = trainer.train(dataset)
 
         logger.info("Distillation complete: %s", metrics)
