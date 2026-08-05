@@ -176,6 +176,16 @@ class CosineDistillationObjective(DistillationObjective):
         dataset_repo: HF dataset repo id with precomputed teacher embeddings
             (default: alibayram/wikipedia-40-langs-with-embeddings).
         output_dir: where the trained student model is saved (default: ./distilled_model).
+        subsample_fraction: optional float in (0, 1]. If set, trains on a fraction
+            of the dataset instead of all rows — for a cheap comparative signal
+            (e.g. does a new embedding_init strategy converge faster/lower than the
+            baseline at a comparable point) before committing to a full run. Uses a
+            FIXED shuffle seed (42), so two configs (e.g. mean_composition vs.
+            focus_init) using the same dataset_repo and the same subsample_fraction
+            train on the exact same rows in the exact same order — the comparison
+            stays single-variable (embedding_init only), not also confounded by
+            which rows each run happened to see. Left unset, the full dataset is
+            used, same as the paper.
         Any PAPER_HYPERPARAMETERS key may be overridden here too.
     (tracker is passed to .train() by the pipeline, not read from params here.)
     """
@@ -188,6 +198,7 @@ class CosineDistillationObjective(DistillationObjective):
 
         dataset_repo = self.params.get("dataset_repo", DATASET_REPO)
         output_dir = self.params.get("output_dir", "./distilled_model")
+        subsample_fraction = self.params.get("subsample_fraction")
 
         hyperparameters = {
             **PAPER_HYPERPARAMETERS,
@@ -205,6 +216,15 @@ class CosineDistillationObjective(DistillationObjective):
             trainer = EmbeddingDistillationTrainer(config)
 
             dataset = load_teacher_embeddings_dataset(dataset_repo)
+
+            if subsample_fraction is not None:
+                if not 0 < subsample_fraction <= 1:
+                    raise ValueError(f"subsample_fraction must be in (0, 1], got {subsample_fraction}")
+                # Fixed seed so different configs sharing dataset_repo +
+                # subsample_fraction land on identical rows (see params docstring).
+                num_rows = max(1, int(len(dataset) * subsample_fraction))
+                dataset = dataset.shuffle(seed=42).select(range(num_rows))
+                logger.info("subsample_fraction=%s: training on %d rows", subsample_fraction, num_rows)
 
             with _force_cosine_lr_schedule(), _patch_device_transfer(), _log_loss_to_tracker(tracker):
                 metrics = trainer.train(dataset)

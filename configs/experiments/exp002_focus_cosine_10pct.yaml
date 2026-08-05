@@ -1,0 +1,54 @@
+# exp002 (10% data) — cheap comparative test: FOCUS embedding init on a small,
+# fixed-seed subsample of the distillation corpus, to get a fast/cheap signal on
+# whether FOCUS beats mean_composition before committing to a full ~10-hour run.
+# See exp002_focus_cosine.yaml for the full-data version of this experiment, and
+# exp001_mean_composition_cosine_10pct.yaml for the matching baseline comparison
+# config (same dataset_repo + subsample_fraction -> trains on the EXACT SAME rows,
+# so the comparison is single-variable: embedding_init only).
+#
+# Filename convention: the "_10pct" suffix reflects distillation.params.subsample_fraction
+# below, so how much data an experiment used is visible from the filename alone.
+
+experiment:
+  number: 2
+  description: >
+    Cheap comparative test (10% of the distillation corpus, fixed shuffle seed)
+    of FOCUS embedding init vs. mean_composition, before deciding whether to spend
+    a full run's compute budget on FOCUS. Not intended to produce a final/reportable
+    model — see exp002_focus_cosine.yaml for the full-data version.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: focus_init
+  params:
+    # Materialized once via src/data/focus_corpus.py's extract_turkish_corpus_file()
+    # before running this config.
+    target_corpus_path: ./data/focus_turkish_corpus.txt
+    language: tr
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp002_10pct
+    subsample_fraction: 0.1  # <-- the actual mechanism; filename just reflects it
+
+evaluation:
+  output_folder: results/exp002_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp002_embeddinggemma300m_reuse_pretrained_focus_init_cosine
+  # (data_fraction tag below is what distinguishes this from the full-data run in MLflow)
+  tags:
+    purpose: focus_vs_mean_composition_subsample_test
+    data_fraction: "10pct"

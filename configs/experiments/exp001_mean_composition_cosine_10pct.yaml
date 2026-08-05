@@ -1,0 +1,51 @@
+# exp001 (10% data) — matching baseline for exp002_focus_cosine_10pct.yaml: the
+# paper's mean_composition embedding init on the SAME fixed-seed 10% subsample of
+# the distillation corpus (same dataset_repo + subsample_fraction as the FOCUS test
+# config -> identical rows, see src/distillation/cosine.py's subsample_fraction
+# docstring). This is a NEW, separate small run for cheap comparison — it does not
+# touch or replace the real exp001 checkpoint-1600 result already obtained on the
+# full dataset (see exp001_mean_composition_cosine.yaml / SESSION_NOTES.md).
+#
+# Filename convention: the "_10pct" suffix reflects distillation.params.subsample_fraction
+# below, so how much data an experiment used is visible from the filename alone.
+
+experiment:
+  number: 1
+  description: >
+    Cheap comparative test (10% of the distillation corpus, fixed shuffle seed,
+    same rows as exp002_focus_cosine_10pct.yaml) of mean_composition embedding
+    init, as the baseline side of a FOCUS-vs-mean_composition subsample
+    comparison. Not the real exp001 run (see exp001_mean_composition_cosine.yaml
+    for that, already completed to checkpoint-1600 on the full dataset).
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp001_10pct
+    subsample_fraction: 0.1  # <-- the actual mechanism; filename just reflects it
+
+evaluation:
+  output_folder: results/exp001_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp001_embeddinggemma300m_reuse_pretrained_mean_composition_cosine
+  # (data_fraction tag below is what distinguishes this from the real exp001 run in MLflow)
+  tags:
+    purpose: focus_vs_mean_composition_subsample_test
+    data_fraction: "10pct"
