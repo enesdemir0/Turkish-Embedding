@@ -61,7 +61,11 @@ class FocusEmbeddingInit(EmbeddingInitStrategy):
         from deepfocus import FOCUS  # import path UNCONFIRMED — see module docstring
 
         corpus_path = Path(self.params["target_corpus_path"])
-        if not corpus_path.exists():
+        # Treat a missing OR empty file as "needs (re)building" — an empty file
+        # left over from an earlier interrupted/failed attempt would otherwise be
+        # silently accepted here and only surface as a confusing error deep inside
+        # deepfocus's own tokenization step.
+        if not corpus_path.exists() or corpus_path.stat().st_size == 0:
             # Build it on the fly rather than requiring a separate manual step
             # before the pipeline runs — reuses the same distillation corpus
             # (alibayram/wikipedia-40-langs-with-embeddings) filtered to the

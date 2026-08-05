@@ -28,6 +28,13 @@ def extract_turkish_corpus_file(
     dataset = load_teacher_embeddings_dataset(dataset_repo)
     filtered = dataset.filter(lambda row: row["lang"] == language)
 
+    if len(filtered) == 0:
+        raise ValueError(
+            f"No rows matched language='{language}' in {dataset_repo}'s 'lang' column — "
+            f"refusing to write an empty corpus file (FOCUS would fail on it downstream "
+            f"with a much more confusing error). Check the dataset's actual lang values."
+        )
+
     with output_path.open("w", encoding="utf-8") as f:
         for row in filtered:
             f.write(row["text"].replace("\n", " ").strip() + "\n")
