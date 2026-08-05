@@ -35,9 +35,15 @@ class FocusEmbeddingInit(EmbeddingInitStrategy):
     """params:
         target_corpus_path: path to a plain-text corpus file (one document per
             line) used to fit FOCUS's auxiliary target-language fasttext
-            embeddings — see src/data/focus_corpus.py for how exp002 builds this
-            from the existing distillation corpus.
-        language: target language code, e.g. "tr".
+            embeddings. If this file doesn't exist yet, compose() builds it
+            automatically (see src/data/focus_corpus.py) from the existing
+            distillation corpus (alibayram/wikipedia-40-langs-with-embeddings) —
+            no separate manual step required before running the pipeline.
+        language: target language code passed to FOCUS itself, e.g. "tr".
+        corpus_language: language column value used to filter the corpus when
+            auto-building target_corpus_path (default "tur", matching the
+            dataset's `lang` column — see teacher_embeddings.py). Only used if
+            target_corpus_path doesn't already exist.
         fasttext_model_path: optional path to a pre-trained fasttext model, if
             FOCUS expects one instead of training from target_corpus_path.
     Param names are a best guess pending confirmation against the real deepfocus
@@ -48,9 +54,21 @@ class FocusEmbeddingInit(EmbeddingInitStrategy):
         # Lazy imports (matches model_cloning/clone.py's convention) so this module
         # stays importable/py_compile-able without deepfocus/torch/transformers
         # installed.
+        from pathlib import Path
+
         from transformers import AutoModel, AutoTokenizer
 
         from deepfocus import FOCUS  # import path UNCONFIRMED — see module docstring
+
+        corpus_path = Path(self.params["target_corpus_path"])
+        if not corpus_path.exists():
+            # Build it on the fly rather than requiring a separate manual step
+            # before the pipeline runs — reuses the same distillation corpus
+            # (alibayram/wikipedia-40-langs-with-embeddings) filtered to the
+            # target language.
+            from src.data.focus_corpus import extract_turkish_corpus_file
+
+            extract_turkish_corpus_file(corpus_path, language=self.params.get("corpus_language", "tur"))
 
         source_model = AutoModel.from_pretrained(teacher_model)
         source_embeddings = source_model.get_input_embeddings().weight
