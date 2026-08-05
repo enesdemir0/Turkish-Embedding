@@ -22,12 +22,38 @@ Unlike `mean_composition` (which returns None because transformer-cloner's nativ
 clone already *is* mean-composition), FOCUS has no transformer-cloner equivalent, so
 this is the first strategy that actually returns a real matrix for
 `model_cloning/clone.py`'s `_maybe_override_embeddings` to inject.
+
+Also observed on a real Colab run (not guessed): deepfocus caches its tokenized
+corpus under ~/.cache/deepfocus/data/, keyed by filename rather than content, which
+reused a stale/empty cache entry across retries and produced a `SchemaInferenceError`
+even after the underlying corpus file was fixed. `_clear_stale_deepfocus_tokenization_cache`
+below clears that cache for the current corpus filename before every compose() call.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.embedding_init.base import EmbeddingInitStrategy
 from src.embedding_init.registry import EMBEDDING_INIT_REGISTRY
+
+
+def _clear_stale_deepfocus_tokenization_cache(corpus_path: Path) -> None:
+    """deepfocus caches its tokenized version of a corpus file under
+    ~/.cache/deepfocus/data/<filename>_tokenized_<hash>.txt, keyed off the file
+    PATH rather than its content (observed empirically: re-running against a
+    freshly-regenerated corpus file at the same path reused an empty cached
+    tokenization left over from an earlier failed attempt, producing a confusing
+    downstream `SchemaInferenceError` instead of re-tokenizing). Clearing any
+    cache entries for this exact filename before every compose() call avoids that
+    trap — a slightly wasted re-tokenization is a much smaller cost than a
+    silently-stale cache poisoning the run.
+    """
+    cache_dir = Path.home() / ".cache" / "deepfocus" / "data"
+    if not cache_dir.exists():
+        return
+    for stale_file in cache_dir.glob(f"{corpus_path.name}_tokenized_*"):
+        stale_file.unlink()
 
 
 @EMBEDDING_INIT_REGISTRY.register("focus_init")
@@ -73,6 +99,8 @@ class FocusEmbeddingInit(EmbeddingInitStrategy):
             from src.data.focus_corpus import extract_turkish_corpus_file
 
             extract_turkish_corpus_file(corpus_path, language=self.params.get("corpus_language", "tur"))
+
+        _clear_stale_deepfocus_tokenization_cache(corpus_path)
 
         source_model = AutoModel.from_pretrained(teacher_model)
         source_embeddings = source_model.get_input_embeddings().weight
