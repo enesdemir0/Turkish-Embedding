@@ -9,6 +9,7 @@ datasets
 sentencepiece
 transformer-cloner
 distil-trainer
+deepfocus
 
 # Evaluation (Step 5)
 git+https://github.com/selmanbaysan/mteb_tr.git

@@ -1,0 +1,57 @@
+# exp002 — FOCUS embedding init (Dobler & de Melo 2023, arXiv:2305.14481;
+# deepfocus package) + cosine distillation. See README.md for the
+# naming/tracking convention, SESSION_NOTES.md for full context.
+#
+# tokenizer_surgery/model_cloning/distillation are held identical to exp001 so
+# this is a clean single-variable comparison against exp001's checkpoint-1600
+# baseline (mean_composition embedding init). NOTE: exp001 only reached ~70% of
+# training — any head-to-head comparison must account for that, not treat this
+# as apples-to-apples against a fully-converged exp001.
+
+experiment:
+  number: 2
+  description: >
+    FOCUS embedding init (sparsemax-weighted composition over auxiliary
+    target-language fasttext embeddings, no bilingual dictionary needed) +
+    cosine distillation (distil-trainer, paper's exact hyperparameters), using
+    the paper's own published tokenizer, same as exp001.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: focus_init
+  params:
+    # Materialized once via src/data/focus_corpus.py's
+    # extract_turkish_corpus_file() before running this config, from the same
+    # alibayram/wikipedia-40-langs-with-embeddings corpus used for distillation.
+    target_corpus_path: ./data/focus_turkish_corpus.txt
+    language: tr
+    # fasttext_model_path intentionally omitted — best guess is FOCUS trains
+    # its own auxiliary embeddings from target_corpus_path; confirm against
+    # the real deepfocus API on the first Colab run (see focus_init.py).
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192  # paper §4.1: 4x the teacher's native 2048
+
+distillation:
+  strategy: cosine
+  params:
+    # Same as exp001 — all hyperparameters default to
+    # src/distillation/cosine_distillation.py's PAPER_HYPERPARAMETERS, left
+    # unset here so this stays a single-variable (embedding_init) comparison.
+    output_dir: ./distilled_model/exp002
+
+evaluation:
+  output_folder: results/exp002
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp002_embeddinggemma300m_reuse_pretrained_focus_init_cosine
+  tags:
+    purpose: focus_embedding_init_experiment
