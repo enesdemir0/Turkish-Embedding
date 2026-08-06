@@ -65,6 +65,7 @@ def run_evaluation(
     else:
         benchmark = mteb.get_benchmark(benchmark_name)
         evaluation = mteb.MTEB(tasks=benchmark)
+        tasks = benchmark
 
     evaluation.run(model, output_folder=output_folder, encode_kwargs={"batch_size": batch_size})
 
