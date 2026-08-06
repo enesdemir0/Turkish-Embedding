@@ -15,7 +15,7 @@
 # GatedRepoError regardless of the token being valid.
 
 # %%
-CONFIG_PATH = "configs/experiments/exp002_focus_cosine_10pct.yaml"  # <- only thing to change per run
+CONFIG_PATH = "configs/experiments/exp003_zero_distillation_mean_composition.yaml"  # <- only thing to change per run
 
 # %%
 # --- Install dependencies ---

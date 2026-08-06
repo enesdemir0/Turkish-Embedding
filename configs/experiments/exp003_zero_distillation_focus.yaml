@@ -1,0 +1,45 @@
+# exp003 (zero distillation, FOCUS init) — ablation, not a real experiment
+# result. Same purpose as exp003_zero_distillation_mean_composition.yaml, but
+# isolating the FOCUS init's contribution at initialization instead of
+# mean_composition's. Compare against exp002_focus_cosine_10pct.yaml's real
+# 1-epoch/3-epoch results to see how much distillation training adds on top of
+# FOCUS's head start specifically.
+
+experiment:
+  number: 3
+  description: >
+    Ablation: skip distillation entirely (src/distillation/skip.py, a no-op
+    strategy) and evaluate the model immediately after tokenizer surgery + model
+    cloning + FOCUS embedding init. Isolates how much of the score is inherited
+    from the teacher at initialization vs. earned through training.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: focus_init
+  params:
+    # Materialized once via src/data/focus_corpus.py's extract_turkish_corpus_file()
+    # before running this config.
+    target_corpus_path: ./data/focus_turkish_corpus.txt
+    language: tr
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: skip
+  params: {}
+
+evaluation:
+  output_folder: results/exp003_zero_distillation_focus
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: zero_distillation_ablation
+    data_fraction: "0pct"

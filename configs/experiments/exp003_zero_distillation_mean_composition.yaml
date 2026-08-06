@@ -1,0 +1,46 @@
+# exp003 (zero distillation, mean_composition init) — ablation, not a real
+# experiment result. Goal: measure how much of the eval score comes purely from
+# cloning the teacher's backbone + mean_composition embedding init, BEFORE any
+# distillation training runs. distil-trainer trains the entire student model, not
+# just the embedding table (confirmed by reading its installed source) — so the
+# backbone is only guaranteed identical to the teacher's at this exact point.
+# Comparing this checkpoint's numbers against exp001_..._10pct's real 1-epoch
+# result is what tells us how much distillation training actually adds.
+#
+# Pairs with exp003_zero_distillation_focus.yaml (same ablation, FOCUS init) for
+# the same comparison on the FOCUS side.
+
+experiment:
+  number: 3
+  description: >
+    Ablation: skip distillation entirely (src/distillation/skip.py, a no-op
+    strategy) and evaluate the model immediately after tokenizer surgery + model
+    cloning + mean_composition embedding init. Isolates how much of the score is
+    inherited from the teacher at initialization vs. earned through training.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: skip
+  params: {}
+
+evaluation:
+  output_folder: results/exp003_zero_distillation_mean_composition
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: zero_distillation_ablation
+    data_fraction: "0pct"
