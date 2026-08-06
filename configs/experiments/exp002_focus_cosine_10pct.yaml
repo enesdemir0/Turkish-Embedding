@@ -39,6 +39,9 @@ distillation:
   params:
     output_dir: ./distilled_model/exp002_10pct
     subsample_fraction: 0.1  # <-- the actual mechanism; filename just reflects it
+    num_epochs: 3  # bumped from paper's default 1: testing whether FOCUS's advantage
+    # over mean_composition (if any) only shows up with more training on this same
+    # 10% slice, before committing to the full ~10-hour run. See SESSION_NOTES.md.
 
 evaluation:
   output_folder: results/exp002_10pct
