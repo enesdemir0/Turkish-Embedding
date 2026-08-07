@@ -1,0 +1,52 @@
+# exp005 — benchmark verification, not a real experiment. Goal: confirm that
+# this project's own eval pipeline (src/evaluation/mteb_tr_runner.py, the full
+# 26-task MTEB(Turkish) suite) reproduces the SAME numbers Hugging Face publishes
+# for alibayram/embeddingmagibu-200m, before trusting any further comparison
+# against that table (e.g. exp004's contrastive_finetune result).
+#
+# Uses the same "Option A" identity-clone trick as exp004: tokenizer_surgery +
+# model_cloning.teacher_model both point at the published checkpoint, with
+# embedding_init.strategy: mean_composition (compose() -> None) so
+# SentenceTransformerCloner performs an effective identity clone. Combined with
+# distillation.strategy: skip (zero training, src/distillation/skip.py — already
+# built for the exp003 ablation), the model entering evaluation is the published
+# checkpoint completely unmodified. If this run's per-task numbers don't match
+# the published table, the eval methodology itself (task list, split, metric
+# selection, or score aggregation) is suspect and needs investigating BEFORE
+# trusting exp004's numbers as a real comparison.
+
+experiment:
+  number: 5
+  description: >
+    Benchmark verification: run the published alibayram/embeddingmagibu-200m
+    checkpoint completely unmodified (identity clone + skip distillation)
+    through this project's own MTEB(Turkish) eval pipeline, to confirm our
+    per-task numbers match the officially published table before trusting any
+    comparison built on top of it (e.g. exp004's contrastive fine-tune result).
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: alibayram/embeddingmagibu-200m
+  max_seq_length: 8192
+
+distillation:
+  strategy: skip
+  params: {}
+
+evaluation:
+  output_folder: results/exp005_paper_model_benchmark_verification
+  batch_size: 16
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: benchmark_verification
+    base_checkpoint: alibayram_embeddingmagibu_200m
