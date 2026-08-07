@@ -40,17 +40,26 @@ _TRAINING_ARG_KEYS = {
 }
 
 
-def _load_nli_pairs(dataset_repo: str, subsample_size: int | None, seed: int):
+def _load_nli_pairs(dataset_repo: str, dataset_config: str | None, subsample_size: int | None, seed: int):
     """Loads entailment pairs from a Turkish NLI dataset (e.g. emrecan/all-nli-tr)
     and returns a Dataset with exactly two columns: anchor, positive.
 
-    Column names/label encoding for a new dataset_repo aren't guessed here —
-    fails loud if the expected columns aren't present, rather than silently
-    misreading garbage into the trainer (same discipline as
-    src/data/focus_corpus.py's language-code detection)."""
+    Some HF dataset repos (confirmed for emrecan/all-nli-tr, via a real Colab
+    error) bundle several views of the same underlying data as separate
+    "configs" (e.g. "pair", "pair-class", "pair-score", "triplet") and refuse to
+    load without one being named explicitly. `dataset_config="pair"` is the
+    already-filtered (anchor, positive) entailment-pairs view — exactly the
+    two-column shape mine_hard_negatives() needs, no label-filtering required.
+
+    Column names for a new dataset_repo aren't guessed beyond this — fails loud
+    if the expected columns aren't present, rather than silently misreading
+    garbage into the trainer (same discipline as src/data/focus_corpus.py's
+    language-code detection)."""
     from datasets import load_dataset
 
-    dataset = load_dataset(dataset_repo, split="train")
+    dataset = load_dataset(dataset_repo, dataset_config, split="train") if dataset_config else load_dataset(
+        dataset_repo, split="train"
+    )
 
     columns = set(dataset.column_names)
     if {"premise", "hypothesis", "label"} <= columns:
@@ -62,9 +71,10 @@ def _load_nli_pairs(dataset_repo: str, subsample_size: int | None, seed: int):
     else:
         raise ValueError(
             f"Don't know how to extract (anchor, positive) entailment pairs from "
-            f"{dataset_repo!r} — got columns {sorted(columns)}, expected either "
-            f"{{'premise', 'hypothesis', 'label'}} or {{'anchor', 'positive'}}. "
-            f"Inspect the dataset schema and extend _load_nli_pairs."
+            f"{dataset_repo!r} (config={dataset_config!r}) — got columns "
+            f"{sorted(columns)}, expected either {{'premise', 'hypothesis', 'label'}} "
+            f"or {{'anchor', 'positive'}}. Inspect the dataset schema and extend "
+            f"_load_nli_pairs."
         )
 
     dataset = dataset.select_columns(["anchor", "positive"])
@@ -81,6 +91,11 @@ def _load_nli_pairs(dataset_repo: str, subsample_size: int | None, seed: int):
 class ContrastiveFinetuneDistillationObjective(DistillationObjective):
     """params:
         dataset_repo: HF dataset repo id of Turkish NLI pairs (default: emrecan/all-nli-tr).
+        dataset_config: HF dataset "config name" (default: "pair") — some repos
+            (confirmed for emrecan/all-nli-tr) bundle several views of the same
+            data ("pair", "pair-class", "pair-score", "triplet") and require one
+            named explicitly. "pair" is the already-filtered (anchor, positive)
+            entailment-pairs view. Set to None for a dataset_repo with no configs.
         subsample_size: optional int. If set, trains on this many entailment pairs
             instead of the full dataset — for a cheap go/no-go signal before
             committing to the full ~482K-pair dataset. Uses a FIXED seed (see
@@ -107,6 +122,7 @@ class ContrastiveFinetuneDistillationObjective(DistillationObjective):
         from transformers import TrainerCallback
 
         dataset_repo = self.params.get("dataset_repo", "emrecan/all-nli-tr")
+        dataset_config = self.params.get("dataset_config", "pair")
         subsample_size = self.params.get("subsample_size", 5000)
         num_negatives = self.params.get("num_negatives", 5)
         range_min = self.params.get("range_min", 10)
@@ -132,6 +148,7 @@ class ContrastiveFinetuneDistillationObjective(DistillationObjective):
             tracker.log_params(
                 {
                     "dataset_repo": dataset_repo,
+                    "dataset_config": dataset_config,
                     "subsample_size": subsample_size,
                     "num_negatives": num_negatives,
                     "range_min": range_min,
@@ -143,7 +160,7 @@ class ContrastiveFinetuneDistillationObjective(DistillationObjective):
                 }
             )
 
-        pairs = _load_nli_pairs(dataset_repo, subsample_size, seed)
+        pairs = _load_nli_pairs(dataset_repo, dataset_config, subsample_size, seed)
 
         triplets = mine_hard_negatives(
             pairs,
