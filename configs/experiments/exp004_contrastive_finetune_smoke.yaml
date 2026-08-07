@@ -1,0 +1,72 @@
+# exp004 (smoke test) — second-stage contrastive fine-tune with mined hard
+# negatives, applied on top of the paper's own published, fully-trained
+# checkpoint (alibayram/embeddingmagibu-200m), not this project's own partial
+# checkpoint-1600. Motivated by the exp003 zero-distillation ablation
+# (SESSION_NOTES.md): distillation training is the dominant lever for result
+# quality, and retrieval/STS collapsed hardest without it — exactly what
+# contrastive fine-tuning with hard negatives directly targets.
+#
+# tokenizer_surgery + model_cloning.teacher_model are BOTH pointed at the same
+# repo, with embedding_init.strategy: mean_composition (compose() -> None) —
+# since source and target tokenizer are then identical, SentenceTransformerCloner
+# performs an effective identity clone. The model entering contrastive_finetune's
+# train() is therefore weight-identical to the published checkpoint, so mining
+# hard negatives "against the base model" and mining against `model` here are
+# the same thing. This also means NO separate baseline eval run is needed: the
+# already-published 26-task table for embeddingmagibu-200m (SESSION_NOTES.md,
+# ORTALAMA 63.9) *is* the "before" state for this exact model.
+#
+# Cheap-first discipline (same pattern as the FOCUS 10pct test and the
+# zero-distillation ablation): small fixed-seed subsample of Turkish NLI pairs
+# (5,000 rows) for a first go/no-go signal, before spending a full run on the
+# complete ~482K-pair dataset.
+
+experiment:
+  number: 4
+  description: >
+    Smoke test of the contrastive_finetune distillation strategy — fine-tunes
+    the paper's published embeddingmagibu-200m checkpoint (loaded via an
+    effective identity clone: reuse_pretrained tokenizer + mean_composition
+    embedding_init, both pointed at the same repo) on a small fixed-seed
+    subsample (5,000 pairs) of Turkish NLI data with mined hard negatives and
+    MultipleNegativesRankingLoss. Compare the resulting full 26-task MTEB eval
+    against the already-published embeddingmagibu-200m table in
+    SESSION_NOTES.md; scale up only if this shows real improvement.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: alibayram/embeddingmagibu-200m
+  max_seq_length: 8192
+
+distillation:
+  strategy: contrastive_finetune
+  params:
+    dataset_repo: emrecan/all-nli-tr
+    subsample_size: 5000
+    num_negatives: 5
+    range_min: 10
+    range_max: 50
+    num_epochs: 1
+    batch_size: 32
+    learning_rate: 2.0e-5
+    output_dir: ./distilled_model/exp004_smoke
+    seed: 42
+
+evaluation:
+  output_folder: results/exp004_smoke
+  batch_size: 16
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: contrastive_finetune_smoke_test
+    base_checkpoint: alibayram_embeddingmagibu_200m
+    data_size: "5k_pairs"
