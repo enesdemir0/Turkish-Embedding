@@ -1,0 +1,70 @@
+# exp004c — scale-up test: same recipe as exp004b_contrastive_finetune_lower_lr.yaml
+# (learning_rate: 5e-6, the value that recovered most of exp004's NLI/classification
+# collateral damage while keeping its retrieval gains), only `subsample_size`
+# scaled up 5000 -> 50000 (10x more Turkish NLI pairs, same fixed seed so the 5K
+# rows are a strict subset of these 50K).
+#
+# Why now, not earlier: per the project's cheap-first discipline, scaling data
+# only makes sense once the recipe itself isn't actively hurting the model.
+# exp004 (learning_rate=2e-5) showed real damage (MnliTr -6.6, XNLI -6.7,
+# TurkishMovieSentimentClassification -7.3 vs. published) alongside real
+# retrieval gains (SquadTRRetrieval +5.2, XQuADRetrieval +2.5). exp004b
+# (learning_rate=5e-6, same 5K pairs) recovered most of that damage
+# (mean ~63.7 vs. published 63.9) while mostly preserving/improving the
+# retrieval gains (SciFactTR, STSbTR, ArguAnaTR even improved further) — so 5e-6
+# is now the validated starting recipe worth scaling up, not 2e-5.
+#
+# Expected cost: exp004b's real train_runtime was ~405s for ~25,000 mined
+# triplets (5,000 pairs x num_negatives=5) — training time scales roughly
+# linearly with triplet count, so 50,000 pairs (~250,000 triplets) should take
+# roughly 10x as long (~65-70 min), while evaluation (fixed 26-task suite) and
+# hard-negative mining scale independently/more mildly. Total run expected in
+# the ~1.5-2 hour range, not the ~15-20 min of the 5K smoke tests.
+
+experiment:
+  number: 4
+  description: >
+    Scale-up of exp004b_contrastive_finetune_lower_lr.yaml's validated recipe
+    (learning_rate=5e-6) from 5,000 to 50,000 Turkish NLI pairs (same seed, same
+    base checkpoint via identity clone). Tests whether more data extends the
+    retrieval gains further now that the recipe is no longer net-negative on
+    NLI/classification tasks.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: alibayram/embeddingmagibu-200m
+  max_seq_length: 8192
+
+distillation:
+  strategy: contrastive_finetune
+  params:
+    dataset_repo: emrecan/all-nli-tr
+    subsample_size: 50000
+    num_negatives: 5
+    range_min: 10
+    range_max: 50
+    num_epochs: 1
+    batch_size: 32
+    learning_rate: 5.0e-6
+    output_dir: ./distilled_model/exp004c_50k
+    seed: 42
+
+evaluation:
+  output_folder: results/exp004c_50k
+  batch_size: 16
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: contrastive_finetune_scale_up_50k
+    base_checkpoint: alibayram_embeddingmagibu_200m
+    data_size: "50k_pairs"
+    compare_against: exp004b_contrastive_finetune_lower_lr
