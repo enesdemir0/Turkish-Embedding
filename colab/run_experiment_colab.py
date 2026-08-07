@@ -15,7 +15,7 @@
 # GatedRepoError regardless of the token being valid.
 
 # %%
-CONFIG_PATH = "configs/experiments/exp005_paper_model_benchmark_verification.yaml"  # <- only thing to change per run
+CONFIG_PATH = "configs/experiments/exp004b_contrastive_finetune_lower_lr.yaml"  # <- only thing to change per run
 
 # %%
 # --- Install dependencies ---

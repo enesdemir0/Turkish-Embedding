@@ -1,0 +1,70 @@
+# exp004b — same smoke test as exp004_contrastive_finetune_smoke.yaml (identical
+# 5,000-pair fixed-seed subsample, identical mining/base-checkpoint setup), only
+# `learning_rate` changed (2e-5 -> 5e-6, a 4x reduction). Everything else held
+# fixed so this stays a single-variable comparison against exp004.
+#
+# Why: exp004's real result (SESSION_NOTES.md-worthy finding, not yet written up
+# there) showed a mixed picture — retrieval tasks clearly improved
+# (SquadTRRetrieval +5.2, XQuADRetrieval +2.5, CQADupstackGamingRetrievalTR +1.9
+# over the published embeddingmagibu-200m table) but NLI-classification and
+# general sentiment/topic classification got notably worse (MnliTr -6.6,
+# XNLI -6.7, TurkishMovieSentimentClassification -7.3), for a net mean of 62.97
+# vs. the published 63.9. This config tests whether that collateral damage was
+# caused by too-aggressive training (fixable with a lower LR, tested here) as
+# opposed to the data itself being too narrow (would need broader/mixed data
+# instead — a separate, not-yet-built follow-up if this doesn't help).
+#
+# Decision rule: if this keeps (most of) exp004's retrieval gains while
+# recovering the NLI/classification drop, lower LR is the fix and this becomes
+# the new starting point for scaling up data size later. If NLI/classification
+# is still notably down, the problem is data diversity, not learning rate, and
+# the next move is mixing in non-NLI pairs instead.
+
+experiment:
+  number: 4
+  description: >
+    Same as exp004_contrastive_finetune_smoke.yaml (identical 5,000-pair
+    fixed-seed NLI subsample, identical base checkpoint via identity clone),
+    with learning_rate lowered 2e-5 -> 5e-6 to test whether exp004's
+    NLI/classification regression (MnliTr -6.6, XNLI -6.7,
+    TurkishMovieSentimentClassification -7.3 vs. the published table) was
+    caused by too-aggressive training rather than the NLI-only data itself.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: alibayram/embeddingmagibu-200m
+  max_seq_length: 8192
+
+distillation:
+  strategy: contrastive_finetune
+  params:
+    dataset_repo: emrecan/all-nli-tr
+    subsample_size: 5000
+    num_negatives: 5
+    range_min: 10
+    range_max: 50
+    num_epochs: 1
+    batch_size: 32
+    learning_rate: 5.0e-6
+    output_dir: ./distilled_model/exp004b_lower_lr
+    seed: 42
+
+evaluation:
+  output_folder: results/exp004b_lower_lr
+  batch_size: 16
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: contrastive_finetune_lower_lr_test
+    base_checkpoint: alibayram_embeddingmagibu_200m
+    data_size: "5k_pairs"
+    compare_against: exp004_contrastive_finetune_smoke
