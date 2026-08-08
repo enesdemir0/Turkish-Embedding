@@ -1,0 +1,84 @@
+# exp004d — mixed-data test: same validated recipe as exp004b/exp004c
+# (learning_rate=5e-6), but training data now blends TWO sources instead of
+# NLI alone: the same 5,000-pair Turkish NLI subsample (identical seed/rows as
+# exp004/exp004b) PLUS a Turkish STS-B slice (emrecan/stsb-mt-turkish),
+# filtered to score >= 4.0 (near-paraphrase pairs only, since
+# MultipleNegativesRankingLoss needs a binary "these mean the same thing" pair,
+# not a graded similarity score).
+#
+# Why: exp004 (LR 2e-5) and exp004c (LR 5e-6, 50K NLI pairs) both showed the
+# same pattern — retrieval/STS improves, but NLI-as-classification and general
+# sentiment/topic classification measurably degrade, and the damage scales with
+# total training steps regardless of learning rate (see SESSION_NOTES.md-worthy
+# finding from exp004/exp004b/exp004c). This points at data narrowness, not
+# just training aggressiveness, as the root cause: training exclusively on one
+# style of text (short NLI claim/hypothesis pairs) specializes the embedding
+# space in one direction. Blending in a second, more topically/stylistically
+# diverse sentence-pair source is the standard fix used by existing successful
+# Turkish sentence-embedding models on Hugging Face (which train on multiple
+# datasets together, e.g. snli-tr + xnli-tr + msmarco-tr), not a novel idea.
+#
+# Decision rule: if this keeps most of the retrieval gains (SquadTRRetrieval,
+# XQuADRetrieval, SciFactTR, etc.) while the NLI/classification tasks
+# (MnliTr, XNLI, TurkishMovieSentimentClassification, ...) stay much closer to
+# the published baseline than exp004/exp004c showed, data diversity was the
+# real fix. If NLI/classification is still notably down despite the mix, the
+# STS-B slice wasn't diverse/large enough and a bigger or third source is
+# worth trying next.
+
+experiment:
+  number: 4
+  description: >
+    Same validated recipe as exp004b (learning_rate=5e-6, base checkpoint via
+    identity clone), but training data now blends the same 5,000-pair NLI
+    subsample with a Turkish STS-B slice (score >= 4.0, near-paraphrase pairs)
+    instead of NLI alone — tests whether data diversity (not just learning
+    rate) is what's needed to keep retrieval gains without degrading
+    NLI/classification tasks, per the pattern seen across exp004/exp004c.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: alibayram/embeddingmagibu-200m
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: alibayram/embeddingmagibu-200m
+  max_seq_length: 8192
+
+distillation:
+  strategy: contrastive_finetune
+  params:
+    sources:
+      - dataset_repo: emrecan/all-nli-tr
+        dataset_config: pair
+        subsample_size: 5000
+      - dataset_repo: emrecan/stsb-mt-turkish
+        dataset_config: null
+        anchor_column: sentence1
+        positive_column: sentence2
+        score_column: score
+        min_score: 4.0
+    num_negatives: 5
+    range_min: 10
+    range_max: 50
+    num_epochs: 1
+    batch_size: 32
+    learning_rate: 5.0e-6
+    output_dir: ./distilled_model/exp004d_mixed
+    seed: 42
+
+evaluation:
+  output_folder: results/exp004d_mixed
+  batch_size: 16
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: contrastive_finetune_mixed_data_test
+    base_checkpoint: alibayram_embeddingmagibu_200m
+    data_size: "5k_nli_plus_stsb"
+    compare_against: exp004b_contrastive_finetune_lower_lr
