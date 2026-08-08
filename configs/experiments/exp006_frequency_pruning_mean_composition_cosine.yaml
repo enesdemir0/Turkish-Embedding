@@ -1,0 +1,53 @@
+# exp006 — from-scratch tokenizer surgery (frequency_pruning, EMBEDD~3.MD §2) in
+# place of exp001's reused paper tokenizer: 65,536 Turkish-native tokens
+# frequency-selected from a Cosmos-trained SentencePiece-BPE tokenizer, unioned
+# with frequency-selected multilingual tokens from Wikipedia-40-langs, targeting
+# the paper's 131,072-token vocabulary. Same mean-composition init + cosine
+# distillation as exp001, so any delta vs. exp001 isolates the tokenizer-surgery
+# choice as the single variable under test. See
+# src/tokenizer_surgery/frequency_pruning.py's module docstring for the two
+# documented assumptions this strategy makes where the paper is underspecified.
+#
+# Run exp006_..._smoke.yaml first — this full-scale config downloads/trains over
+# the entire Cosmos + Wikipedia-40-langs corpora, expensive on Colab.
+
+experiment:
+  number: 6
+  description: >
+    From-scratch tokenizer surgery (frequency_pruning) in place of exp001's reused
+    paper tokenizer: 65,536 Turkish-native tokens frequency-selected from a
+    Cosmos-trained SentencePiece-BPE tokenizer, unioned with frequency-selected
+    multilingual tokens from Wikipedia-40-langs, targeting the paper's 131,072-token
+    vocabulary. Same mean-composition init + cosine distillation as exp001, so any
+    delta vs exp001 isolates the tokenizer-surgery choice.
+
+tokenizer_surgery:
+  strategy: frequency_pruning
+  params: {}
+  # Every param defaults to the paper's own values (see frequency_pruning.py's
+  # docstring) — left empty on purpose, so this config makes zero silent
+  # deviations from the paper's recipe visible as "nothing overridden".
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192  # paper §4.1: 4x the teacher's native 2048
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp006
+
+evaluation:
+  output_folder: results/exp006
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp006_embeddinggemma300m_frequency_pruning_mean_composition_cosine
+  tags:
+    purpose: frequency_pruning_tokenizer_vs_reuse_pretrained

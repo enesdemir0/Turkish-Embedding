@@ -7,6 +7,7 @@ pyyaml
 sentence-transformers
 datasets
 sentencepiece
+tokenizers
 transformer-cloner
 distil-trainer
 deepfocus
