@@ -1,36 +1,49 @@
-# exp006 (10% data) — cheap comparative test: the REAL from-scratch frequency_pruning
-# tokenizer (full Cosmos + full Wikipedia-40-langs corpora, real vocab sizes — that's
-# the actual thing under test, so it isn't subsampled), but distillation cut down to
-# the SAME fixed-seed 10% subsample already used for
-# exp001_mean_composition_cosine_10pct.yaml (same dataset_repo + subsample_fraction ->
-# identical rows, see src/distillation/cosine.py's subsample_fraction docstring).
-# This gives a fast/cheap signal on whether the from-scratch tokenizer helps or hurts
-# vs. reusing the paper's own tokenizer, before committing to the full ~10-hour
-# exp006_frequency_pruning_mean_composition_cosine.yaml run.
+# exp006 (10% data) — cheap comparative test: the frequency_pruning tokenizer
+# (EMBEDD~3.MD §2 recipe, real target vocab sizes: 65,536 Turkish-native /
+# 131,072 final) paired with a 10% fixed-seed distillation subsample — the exact
+# same rows as exp001_mean_composition_cosine_10pct.yaml — so any delta isolates
+# the tokenizer-surgery choice (frequency_pruning vs. reuse_pretrained) as the
+# single variable, at a fraction of the full run's compute cost.
+#
+# corpus_subsample_fraction=0.1 below: confirmed empirically that trying to train
+# a from-scratch BPE tokenizer over the FULL Cosmos Turkish Corpus v1.0 crashed
+# the Colab session on RAM (twice) — checked its real HF dataset card afterward:
+# 9,075,453 rows / 22.8GB / ~15 BILLION tokens, several orders of magnitude larger
+# than the 580K-row corpus this project already handles fine elsewhere
+# (alibayram/wikipedia-40-langs-with-embeddings). Training a tokenizer on a large
+# *sample* rather than every byte of a corpus is standard practice anyway, not a
+# shortcut unique to this project. 10% of Cosmos is still ~900K rows — plenty for
+# stable frequency statistics — while keeping RAM within a normal Colab session.
+# If this still OOMs, lower this fraction further (e.g. 0.02-0.05) before anything
+# else.
 #
 # Run exp006_..._smoke.yaml FIRST — that one also subsamples the tokenizer-training
-# corpora themselves, just to prove the frequency_pruning plumbing works at all before
-# spending real time building a full-scale tokenizer here.
+# corpora (much more aggressively) with tiny toy vocab sizes, just to prove the
+# frequency_pruning plumbing works at all before spending real time here.
 #
 # Filename convention: the "_10pct" suffix reflects distillation.params.subsample_fraction
 # below, so how much data an experiment used is visible from the filename alone.
+# NOTE tokenizer_surgery.params.corpus_subsample_fraction is a SEPARATE knob (10%
+# of the tokenizer-training corpora), not the same subsample as distillation's.
 
 experiment:
   number: 6
   description: >
-    Cheap comparative test: the real, full-scale frequency_pruning tokenizer
-    (EMBEDD~3.MD §2 recipe, full Cosmos + Wikipedia-40-langs corpora) paired with a
-    10% fixed-seed distillation subsample — the exact same rows as
+    Cheap comparative test: the frequency_pruning tokenizer (EMBEDD~3.MD §2
+    recipe, real target vocab sizes, but a 10% sample of the Cosmos/Wiki-40-langs
+    corpora due to a confirmed RAM crash at full corpus scale) paired with a 10%
+    fixed-seed distillation subsample — the exact same rows as
     exp001_mean_composition_cosine_10pct.yaml — so any delta isolates the
     tokenizer-surgery choice (frequency_pruning vs. reuse_pretrained) as the single
     variable, at a fraction of the full run's compute cost.
 
 tokenizer_surgery:
   strategy: frequency_pruning
-  params: {}
-  # Every param defaults to the paper's own values — the tokenizer itself is built
-  # for real (full corpora, real vocab sizes), since that's what this experiment is
-  # actually testing. Only distillation below is made cheap.
+  params:
+    corpus_subsample_fraction: 0.1
+    # Everything else defaults to the paper's own values (real 65,536/131,072
+    # vocab targets) — only the training CORPUS size is cut down, per the RAM
+    # note above.
 
 embedding_init:
   strategy: mean_composition
