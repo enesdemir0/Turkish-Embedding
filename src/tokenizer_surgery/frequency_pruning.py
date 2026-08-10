@@ -179,9 +179,18 @@ def _splice_merges(
     independently — walked in order given. Returns (kept_merges, added_tokens),
     where added_tokens is whatever final_vocab_strings entry never became
     producible through either source's merge chain."""
+    # Only seed `produced` with base-alphabet entries that actually survived into
+    # the final vocab — the caller's `base` sets are each source tokenizer's FULL
+    # alphabet (e.g. every character seen across all 40 Wikipedia languages), most
+    # of which never got selected into final_vocab_strings. Seeding `produced`
+    # with the unfiltered base let merges reference characters (e.g. Armenian
+    # 'ւ') that are producible from the *source* tokenizer but absent from the
+    # vocab dict we actually build below — models.BPE then rejects the merge with
+    # "Token `X` out of vocabulary". Intersecting with final_vocab_strings keeps
+    # the invariant produced ⊆ final_vocab_strings at every step.
     produced: set[str] = set()
     for _, base in sources:
-        produced |= base
+        produced |= (base & final_vocab_strings)
 
     kept_merges: list[tuple[str, str]] = []
     for merges, _ in sources:

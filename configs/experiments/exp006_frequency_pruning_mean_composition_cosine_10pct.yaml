@@ -1,0 +1,60 @@
+# exp006 (10% data) — cheap comparative test: the REAL from-scratch frequency_pruning
+# tokenizer (full Cosmos + full Wikipedia-40-langs corpora, real vocab sizes — that's
+# the actual thing under test, so it isn't subsampled), but distillation cut down to
+# the SAME fixed-seed 10% subsample already used for
+# exp001_mean_composition_cosine_10pct.yaml (same dataset_repo + subsample_fraction ->
+# identical rows, see src/distillation/cosine.py's subsample_fraction docstring).
+# This gives a fast/cheap signal on whether the from-scratch tokenizer helps or hurts
+# vs. reusing the paper's own tokenizer, before committing to the full ~10-hour
+# exp006_frequency_pruning_mean_composition_cosine.yaml run.
+#
+# Run exp006_..._smoke.yaml FIRST — that one also subsamples the tokenizer-training
+# corpora themselves, just to prove the frequency_pruning plumbing works at all before
+# spending real time building a full-scale tokenizer here.
+#
+# Filename convention: the "_10pct" suffix reflects distillation.params.subsample_fraction
+# below, so how much data an experiment used is visible from the filename alone.
+
+experiment:
+  number: 6
+  description: >
+    Cheap comparative test: the real, full-scale frequency_pruning tokenizer
+    (EMBEDD~3.MD §2 recipe, full Cosmos + Wikipedia-40-langs corpora) paired with a
+    10% fixed-seed distillation subsample — the exact same rows as
+    exp001_mean_composition_cosine_10pct.yaml — so any delta isolates the
+    tokenizer-surgery choice (frequency_pruning vs. reuse_pretrained) as the single
+    variable, at a fraction of the full run's compute cost.
+
+tokenizer_surgery:
+  strategy: frequency_pruning
+  params: {}
+  # Every param defaults to the paper's own values — the tokenizer itself is built
+  # for real (full corpora, real vocab sizes), since that's what this experiment is
+  # actually testing. Only distillation below is made cheap.
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp006_10pct
+    subsample_fraction: 0.1  # <-- the actual mechanism; filename just reflects it
+
+evaluation:
+  output_folder: results/exp006_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp006_embeddinggemma300m_frequency_pruning_mean_composition_cosine
+  # (data_fraction tag below is what distinguishes this from the full-data run in MLflow)
+  tags:
+    purpose: frequency_pruning_vs_reuse_pretrained_subsample_test
+    data_fraction: "10pct"
