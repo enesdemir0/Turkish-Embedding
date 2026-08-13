@@ -1,0 +1,64 @@
+# exp008i — same as exp008e/exp008h (30% fixed-seed data, MSE loss,
+# batch_size=64, warmup_ratio=0.1, 1 epoch), learning_rate set to 2e-6 — a
+# midpoint (roughly the geometric mean) between exp008e's 5e-6 (real training,
+# net NEGATIVE vs. baseline: 0.4655 < 0.4838) and exp008h's 1e-6 (training was
+# essentially a no-op — per-task numbers matched the zero-distillation baseline
+# to 3-4 decimal places, train_loss stayed high at 0.32, so it trivially tied
+# baseline by barely training at all).
+#
+# Why: exp008f (zero distillation, stock BERTurk, no training) scored 0.4838 —
+# higher than every distilled exp008 variant tried so far. The two LRs tested
+# bracket the interesting region: 5e-6 trains for real but hurts, 1e-6 doesn't
+# train enough to do anything. This tests whether a genuine middle ground
+# exists — real training that nets POSITIVE against the baseline — before
+# committing to any further data scaling. See exp008h's config comment /
+# SESSION_NOTES.md for the full reasoning on why data scaling should wait until
+# a net-positive LR is found first (scaling data/steps at a fixed LR has, in
+# every test so far in this series, amplified whatever direction that LR was
+# already trending — not reversed it).
+#
+# Decision rule: if this clearly beats 0.4838 (not just ties it near-trivially
+# the way exp008h did — check per-task deltas and train_loss to confirm real
+# training happened, not another no-op), that's the LR to scale data with next
+# (30% -> 50% -> full). If it's still below 0.4838, or another no-op, that's a
+# stronger signal this recipe family has a real ceiling below "just use
+# BERTurk as-is" regardless of LR.
+
+experiment:
+  number: 8
+  description: >
+    Same as exp008e/exp008h (BERTurk native_pretrained, MSE recipe, 30%
+    fixed-seed data, 1 epoch), learning_rate set to 2e-6 — a midpoint between
+    exp008e's 5e-6 (real training, net negative vs. the 0.4838 zero-distillation
+    baseline) and exp008h's 1e-6 (training was essentially a no-op, tied
+    baseline trivially). Tests whether a genuine net-positive LR exists in
+    between.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008i_mse_recipe_30pct_mid_lr
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008i_mse_recipe_30pct_mid_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_mid_lr_test
+    data_fraction: "30pct"
+    loss_type: mse
+    compare_against: exp008f_native_berturk_zero_distillation
