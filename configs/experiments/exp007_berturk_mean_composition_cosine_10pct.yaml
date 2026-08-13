@@ -1,0 +1,60 @@
+# exp007 (10% data) — tests reusing an existing, well-resourced Turkish tokenizer
+# (BERTurk, dbmdz/bert-base-turkish-128k-cased) in place of the paper's own
+# SentencePiece-BPE tokenizer, on the SAME fixed-seed 10% subsample of the
+# distillation corpus (same dataset_repo + subsample_fraction as
+# exp001_mean_composition_cosine_10pct.yaml -> identical rows), for a clean
+# single-variable comparison. See SESSION_NOTES.md "Current status: exp006" and
+# "Future work" #1 for the full reasoning behind trying BERTurk here.
+#
+# BERTurk is WordPiece (not SentencePiece-BPE), 128K vocab, trained on 35GB/~44B
+# tokens of Turkish-only text (OSCAR + Wikipedia + OPUS + Kemal Oflazer's corpus) —
+# no multilingual tokens at all, unlike the paper's hybrid 65,536-Turkish +
+# 65,536-multilingual vocab. This tests both a bigger/better-resourced tokenizer
+# AND dropping multilingual retention, in one run.
+#
+# Filename convention: the "_10pct" suffix reflects distillation.params.subsample_fraction
+# below, so how much data an experiment used is visible from the filename alone.
+
+experiment:
+  number: 7
+  description: >
+    Cheap comparative test (10% of the distillation corpus, fixed shuffle seed,
+    same rows as exp001_mean_composition_cosine_10pct.yaml) of reusing BERTurk
+    (dbmdz/bert-base-turkish-128k-cased) as the tokenizer instead of the paper's
+    own published tokenizer, with embedding_init/model_cloning/distillation all
+    otherwise unchanged. Tests whether a well-resourced off-the-shelf Turkish
+    tokenizer beats this project's own from-scratch attempt (exp006,
+    frequency_pruning) and the paper's tokenizer, and whether dropping
+    multilingual-token retention helps or hurts.
+
+tokenizer_surgery:
+  strategy: reuse_pretrained
+  params:
+    tokenizer_source: dbmdz/bert-base-turkish-128k-cased
+
+embedding_init:
+  strategy: mean_composition
+  params: {}
+
+model_cloning:
+  teacher_model: google/embeddinggemma-300m
+  max_seq_length: 8192
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp007_10pct
+    subsample_fraction: 0.1  # <-- the actual mechanism; filename just reflects it
+
+evaluation:
+  output_folder: results/exp007_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp007_embeddinggemma300m_reuse_pretrained_mean_composition_cosine
+  # (data_fraction tag below is what distinguishes this from exp001_10pct in MLflow)
+  tags:
+    purpose: berturk_tokenizer_test
+    data_fraction: "10pct"
