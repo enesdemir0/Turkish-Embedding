@@ -1,0 +1,62 @@
+# exp008h — same as exp008e_native_berturk_mse_recipe_30pct_lower_lr.yaml (same
+# 30% fixed-seed data, MSE loss, batch_size=64, warmup_ratio=0.1, 1 epoch), only
+# learning_rate lowered further: 5e-6 -> 1e-6 (another 5x reduction).
+#
+# Why: exp008f (zero distillation — stock BERTurk, no training at all) scored
+# 0.4838, HIGHER than every distilled exp008 variant tried so far, including
+# exp008e's 0.4655 (the best distilled result). Unlike the transformer_clone
+# architecture (where zero training collapses to 0.289 — training is clearly
+# essential there), BERTurk starts from a genuinely strong, independently
+# pretrained place. Every recipe/LR/data change tried so far has closed some of
+# the gap toward 0.4838 without crossing it (exp008b 0.4265 -> exp008d 0.4131 ->
+# exp008e 0.4655), suggesting the distillation objective is still disturbing
+# BERTurk's already-good weights faster than it's replacing them with something
+# better at this LR. This tests whether an even gentler pace tips that balance:
+# does less-aggressive training finally net positive against just not training
+# at all, or does this approach have a real ceiling below the zero-distillation
+# baseline regardless of how low the LR goes?
+#
+# Decision rule: if this beats 0.4838, distillation is a real net positive at
+# some LR and it's worth continuing to push (and worth trying on full data). If
+# it's still below 0.4838, that's a stronger signal this specific
+# recipe/architecture combination may not beat "just use BERTurk as-is" without
+# a more fundamental change (e.g. freezing part of the backbone, a different
+# loss, or accepting native_pretrained isn't the right direction at this scale).
+
+experiment:
+  number: 8
+  description: >
+    Same as exp008e (BERTurk native_pretrained, MSE recipe, 30% fixed-seed
+    data, 1 epoch), learning_rate lowered further 5e-6 -> 1e-6 to test whether
+    an even gentler pace can finally beat exp008f's zero-distillation baseline
+    (0.4838) — something no exp008 variant has managed yet, including
+    exp008e's 0.4655 best result.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008h_mse_recipe_30pct_even_lower_lr
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 1.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008h_mse_recipe_30pct_even_lower_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_even_lower_lr_test
+    data_fraction: "30pct"
+    loss_type: mse
+    compare_against: exp008f_native_berturk_zero_distillation
