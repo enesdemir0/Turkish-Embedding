@@ -1,0 +1,71 @@
+# exp008b — same native_pretrained BERTurk student as exp008
+# (exp008_native_berturk_distillation_10pct.yaml), same 10% subsample/seed, but
+# switches the distillation hyperparameters away from PAPER_HYPERPARAMETERS
+# (src/distillation/cosine.py) to the actual Reimers & Gurevych (EMNLP 2020,
+# "Making Monolingual Sentence Embeddings Multilingual using Knowledge
+# Distillation") recipe this technique is really based on.
+#
+# Why: exp008's 1-epoch (mean 0.395) and 3-epoch (mean 0.389, flat) results both
+# used PAPER_HYPERPARAMETERS unchanged — learning_rate=5e-5, batch_size=256,
+# loss_type="cosine", warmup_ratio=0.01 — a recipe the ali bayram paper's authors
+# tuned specifically for their own weight-preserving Gemma-clone approach. That's
+# a different technique from what exp008/exp008b actually does (distill into an
+# existing pretrained model, no tokenizer surgery), so reusing their
+# hyperparameters was never justified in the first place — a real, fixable
+# mismatch, not evidence the underlying idea doesn't work. Reimers & Gurevych's
+# own method (and sentence-transformers' own shipped distillation recipe) uses
+# MSE loss as its primary variant, not cosine, plus a lower LR and a proper 10%
+# warmup. distil-trainer's EmbeddingTrainerConfig already supports every one of
+# these as plain params (loss_type is a literal "mse"|"cosine" toggle) — no new
+# code needed, config-only change.
+#
+# Kept the same as exp008: model_cloning (native_pretrained, BERTurk,
+# max_seq_length=512), subsample_fraction=0.1 (fixed seed 42, same rows),
+# use_bf16/compile_model/gradient_checkpointing (performance-only settings,
+# unrelated to which recipe is "correct").
+#
+# Changed: loss_type cosine -> mse, learning_rate 5e-5 -> 2e-5 (distil-trainer's
+# own class default, and the more conservative value typically used in
+# sentence-transformers' own distillation examples), batch_size 256 -> 64,
+# warmup_ratio 0.01 -> 0.1 (10%, the standard warmup fraction for this recipe,
+# vs. the paper's near-nonexistent 1%). num_epochs kept at 1 for a cheap first
+# signal before considering more epochs under this new recipe.
+
+experiment:
+  number: 8
+  description: >
+    Same BERTurk (dbmdz/bert-base-turkish-128k-cased) native_pretrained student
+    as exp008, same 10% fixed-seed subsample, but trained with the actual
+    Reimers & Gurevych 2020 distillation recipe (MSE loss, lower LR, proper
+    warmup) instead of the ali bayram paper's Gemma-clone-tuned hyperparameters,
+    which exp008's flat 3-epoch result suggested were the wrong fit for this
+    architecture.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008b_mse_recipe
+    subsample_fraction: 0.1
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008b_mse_recipe
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_reimers_gurevych_recipe_test
+    data_fraction: "10pct"
+    loss_type: mse
+    compare_against: exp008_native_berturk_distillation_10pct
