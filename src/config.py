@@ -52,12 +52,15 @@ class ExperimentConfig:
     config_path: Path
     number: int
     description: str
-    tokenizer_surgery: StageConfig
-    embedding_init: StageConfig
     model_cloning: dict[str, Any]  # must include "teacher_model" (a HF model id)
     distillation: StageConfig
     evaluation: dict[str, Any]
     tracking: TrackingConfig
+    # Optional: a model_cloning strategy that supplies its own already-tokenized
+    # backbone (e.g. native_pretrained) has no use for these — see
+    # ModelCloningStrategy.requires_tokenizer_surgery/requires_embedding_init.
+    tokenizer_surgery: StageConfig | None = None
+    embedding_init: StageConfig | None = None
 
     @property
     def teacher_model(self) -> str:
@@ -67,6 +70,13 @@ class ExperimentConfig:
         the teacher itself (not just the tokenizer/init/objective)."""
         return self.model_cloning["teacher_model"]
 
+    @property
+    def model_cloning_strategy(self) -> str:
+        """Defaults to "transformer_clone" (today's only pre-existing behavior) so
+        every config written before this strategy field existed keeps working
+        unmodified."""
+        return self.model_cloning.get("strategy", "transformer_clone")
+
     @classmethod
     def load(cls, config_path: str | Path) -> "ExperimentConfig":
         config_path = Path(config_path)
@@ -74,12 +84,14 @@ class ExperimentConfig:
             raw = yaml.safe_load(f)
 
         experiment = raw["experiment"]
+        raw_tokenizer_surgery = raw.get("tokenizer_surgery")
+        raw_embedding_init = raw.get("embedding_init")
         return cls(
             config_path=config_path,
             number=experiment["number"],
             description=experiment["description"],
-            tokenizer_surgery=StageConfig.from_dict(raw["tokenizer_surgery"]),
-            embedding_init=StageConfig.from_dict(raw["embedding_init"]),
+            tokenizer_surgery=StageConfig.from_dict(raw_tokenizer_surgery) if raw_tokenizer_surgery else None,
+            embedding_init=StageConfig.from_dict(raw_embedding_init) if raw_embedding_init else None,
             model_cloning=raw["model_cloning"],
             distillation=StageConfig.from_dict(raw["distillation"]),
             evaluation=raw["evaluation"],

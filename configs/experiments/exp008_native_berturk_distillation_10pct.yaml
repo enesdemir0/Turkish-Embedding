@@ -1,0 +1,56 @@
+# exp008 (10% data) — instead of transplanting a foreign tokenizer onto the
+# EmbeddingGemma-300m decoder (exp006 frequency_pruning, exp007 BERTurk-as-transplant,
+# both regressed vs. the paper's own tokenizer), directly load BERTurk
+# (dbmdz/bert-base-turkish-128k-cased), which already has its own native, co-trained
+# WordPiece tokenizer, and wrap it with mean pooling. No tokenizer_surgery, no
+# embedding_init — model_cloning.strategy: native_pretrained skips both stages
+# entirely (src/pipeline.py gates them on the chosen model_cloning strategy's
+# requires_tokenizer_surgery/requires_embedding_init flags). Cheap fixed-seed 10%
+# subsample first, per project convention, before any full run.
+#
+# The distillation teacher is still google/embeddinggemma-300m regardless of this
+# strategy — cosine distillation trains against a dataset whose teacher_embedding_*
+# columns were precomputed offline from it (src/distillation/cosine.py). The
+# `teacher_model` key below is for naming/tagging only; it is never read by
+# native_pretrained.py.
+#
+# max_seq_length is 512, NOT the paper's 8192 — that extension is a structural
+# choice specific to cloning Gemma's architecture and does not apply to a stock
+# BERT-base model, whose learned position embeddings only cover its native
+# max_position_embeddings (512). See SESSION_NOTES.md for the discussion.
+
+experiment:
+  number: 8
+  description: >
+    BERTurk (dbmdz/bert-base-turkish-128k-cased) loaded directly as the student
+    backbone via mean pooling, instead of transplanting a foreign tokenizer onto
+    a decoder that never learned that segmentation scheme (exp006/exp007's
+    failure mode). 10% of the distillation corpus, fixed shuffle seed (same rows
+    as exp001_mean_composition_cosine_10pct.yaml), cheap go/no-go signal before
+    any full run.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008_10pct
+    subsample_fraction: 0.1
+
+evaluation:
+  output_folder: results/exp008_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  # run_name left unset -> auto-derived as
+  # exp008_embeddinggemma300m_none_none_cosine (tokenizer_strategy/embedding_init
+  # both "none" since native_pretrained skips those stages; the
+  # model_cloning_strategy=native_pretrained tag is what distinguishes this run)
+  tags:
+    purpose: native_pretrained_backbone_test
+    data_fraction: "10pct"

@@ -61,11 +61,13 @@ class ExperimentTracker:
     @contextmanager
     def start_run(self) -> Iterator[None]:
         cfg = self.config
+        tokenizer_strategy = cfg.tokenizer_surgery.strategy if cfg.tokenizer_surgery else "none"
+        embedding_init = cfg.embedding_init.strategy if cfg.embedding_init else "none"
         run_name = cfg.tracking.run_name or build_run_name(
             number=cfg.number,
             teacher_model=cfg.teacher_model,
-            tokenizer_strategy=cfg.tokenizer_surgery.strategy,
-            embedding_init=cfg.embedding_init.strategy,
+            tokenizer_strategy=tokenizer_strategy,
+            embedding_init=embedding_init,
             distill_objective=cfg.distillation.strategy,
         )
 
@@ -76,8 +78,9 @@ class ExperimentTracker:
             # add extra one-off tags but should not need to repeat these.
             core_tags = {
                 "teacher_model": cfg.teacher_model,
-                "tokenizer_strategy": cfg.tokenizer_surgery.strategy,
-                "embedding_init": cfg.embedding_init.strategy,
+                "tokenizer_strategy": tokenizer_strategy,
+                "embedding_init": embedding_init,
+                "model_cloning_strategy": cfg.model_cloning_strategy,
                 "distill_objective": cfg.distillation.strategy,
                 "git_commit": _git_commit_hash(),
                 "config_file": str(cfg.config_path),
