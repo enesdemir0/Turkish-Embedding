@@ -1,0 +1,46 @@
+# exp008f — stock, undistilled BERTurk baseline. native_pretrained model_cloning
+# (same as every other exp008 config), distillation.strategy: skip (zero training
+# steps, same mechanism used for exp003's zero-distillation ablation on the
+# Gemma-clone architecture and exp005's benchmark-verification run).
+#
+# Why: the user wanted a real "before" number to compare exp008/b/c/d/e's
+# distilled results against — how good is BERTurk on the 26-task Turkish MTEB
+# benchmark with NO distillation at all, just its own out-of-the-box pretraining
+# + mean pooling? An external leaderboard search for the exact
+# dbmdz/bert-base-turkish-128k-cased variant didn't turn up a directly usable
+# number (and even if it had, it wouldn't be guaranteed to use the same eval
+# methodology as this project's own mteb_tr_runner). Measuring it directly, in
+# the same pipeline, is more reliable and gives a real apples-to-apples
+# reference point — the same logic exp003 used for the transformer_clone side.
+#
+# No subsample_fraction / num_epochs needed — there's no training happening.
+
+experiment:
+  number: 8
+  description: >
+    Stock, undistilled BERTurk (dbmdz/bert-base-turkish-128k-cased) — loaded
+    via native_pretrained, zero training (distillation.strategy: skip), full
+    26-task MTEB(Turkish) eval. Answers "how good is BERTurk on its own, before
+    any distillation?" — the real baseline exp008/b/c/d/e's distilled results
+    should be compared against, measured in the same pipeline/methodology
+    rather than pulled from an external leaderboard.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging, unused here)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: skip
+  params: {}
+
+evaluation:
+  output_folder: results/exp008f_zero_distillation
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_zero_distillation_baseline
+    compare_against: exp008b_native_berturk_mse_recipe_10pct

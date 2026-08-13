@@ -1,0 +1,63 @@
+# exp008g — first full-dataset run of the native_pretrained BERTurk student.
+# Same exact recipe as exp008e_native_berturk_mse_recipe_30pct_lower_lr.yaml
+# (the best exp008 result so far: mean 0.4655) — MSE loss, learning_rate=5e-6,
+# batch_size=64, warmup_ratio=0.1, 1 epoch — only subsample_fraction removed,
+# so it trains on the full ~580K-row dataset instead of a 30% slice.
+#
+# Why: exp008e was the first result to show the corrected recipe (MSE, low LR)
+# and more data working together — a real, broad improvement (0.4131 -> 0.4655)
+# with the train_loss/mteb_mean_score relationship pointing the right way
+# (higher final train_loss, i.e. less literal overfitting to the MSE target,
+# paired with better downstream generalization). That's the signal this project
+# has used throughout to justify scaling up (same "cheap signal earned it" logic
+# as every prior full-data decision). Still just 1 epoch — every multi-epoch
+# test on a fixed data slice so far has hurt (exp008c on 10%, and the same
+# total-step-count coincidence with exp008d on 30%), so more *unique* data is
+# the lever being scaled here, not more passes.
+#
+# Estimated runtime: rough estimate, not measured at this exact configuration.
+# exp008d (30% data, batch_size=64, same eval setup) took ~34 minutes real
+# wall-clock for ~2719 steps. Scaling that per-step rate to the full dataset's
+# ~9062 steps (580,000 rows / 64) gives a rough estimate of ~1.5-2.5 hours total
+# (training + the fixed ~10min eval overhead) — much less than the original
+# ~10-11 hour full run, which used a different, larger architecture and an
+# 8192-token context vs. BERTurk's 512. Worth timing the real run and logging
+# it, same as every other estimate in this project needed correcting once
+# measured.
+
+experiment:
+  number: 8
+  description: >
+    First full-dataset run of BERTurk (dbmdz/bert-base-turkish-128k-cased) via
+    native_pretrained, using exp008e's recipe (MSE loss, lr=5e-6, batch_size=64,
+    warmup_ratio=0.1, 1 epoch) — the best exp008 result so far (mean 0.4655 on
+    30% data). No subsample_fraction set, so this trains on the full
+    distillation corpus.
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008g_mse_recipe_full
+    loss_type: mse
+    learning_rate: 5.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008g_mse_recipe_full
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_full_data_run
+    data_fraction: "full"
+    loss_type: mse
+    compare_against: exp008e_native_berturk_mse_recipe_30pct_lower_lr
