@@ -18,6 +18,17 @@
 # choice specific to cloning Gemma's architecture and does not apply to a stock
 # BERT-base model, whose learned position embeddings only cover its native
 # max_position_embeddings (512). See SESSION_NOTES.md for the discussion.
+#
+# UPDATE after the real 1-epoch run: mteb_mean_score 0.395, well below exp001's
+# 10%-run (0.587), with train_loss=0.674 remaining even after the cosine LR
+# schedule fully decayed (lr=1.64e-06) — a real underfit, not eval noise (same
+# signature exp006 used to confirm its own negative result: loss + mean score
+# moved together). num_epochs bumped 1 -> 3 below (same seed, same 10% rows, no
+# other change) to test whether this is a data-budget problem (loss should keep
+# dropping steeply) or something else (LR/hyperparameters tuned for the
+# Gemma-clone architecture, unvalidated for a structurally unrelated pretrained
+# BERT) — same diagnostic exp002/FOCUS's 3-epoch bump was used for. See
+# SESSION_NOTES.md "Current status: exp008" for the full result and reasoning.
 
 experiment:
   number: 8
@@ -26,8 +37,9 @@ experiment:
     backbone via mean pooling, instead of transplanting a foreign tokenizer onto
     a decoder that never learned that segmentation scheme (exp006/exp007's
     failure mode). 10% of the distillation corpus, fixed shuffle seed (same rows
-    as exp001_mean_composition_cosine_10pct.yaml), cheap go/no-go signal before
-    any full run.
+    as exp001_mean_composition_cosine_10pct.yaml). 3 epochs (bumped from 1 after
+    the 1-epoch result underfit at 0.395 mean score) — same rows, same seed, only
+    num_epochs changed, to see whether more training closes the gap.
 
 model_cloning:
   strategy: native_pretrained
@@ -38,11 +50,12 @@ model_cloning:
 distillation:
   strategy: cosine
   params:
-    output_dir: ./distilled_model/exp008_10pct
+    output_dir: ./distilled_model/exp008_10pct_3epoch
     subsample_fraction: 0.1
+    num_epochs: 3
 
 evaluation:
-  output_folder: results/exp008_10pct
+  output_folder: results/exp008_10pct_3epoch
   batch_size: 64
 
 tracking:
@@ -50,7 +63,9 @@ tracking:
   # run_name left unset -> auto-derived as
   # exp008_embeddinggemma300m_none_none_cosine (tokenizer_strategy/embedding_init
   # both "none" since native_pretrained skips those stages; the
-  # model_cloning_strategy=native_pretrained tag is what distinguishes this run)
+  # model_cloning_strategy=native_pretrained tag and data_fraction/epochs tags
+  # below are what distinguish this run from the 1-epoch one in MLflow)
   tags:
     purpose: native_pretrained_backbone_test
     data_fraction: "10pct"
+    num_epochs: "3"
