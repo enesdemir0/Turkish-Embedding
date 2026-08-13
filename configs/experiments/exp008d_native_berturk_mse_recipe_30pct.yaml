@@ -1,0 +1,53 @@
+# exp008d — same recipe as exp008b_native_berturk_mse_recipe_10pct.yaml (MSE
+# loss, learning_rate=2e-5, batch_size=64, warmup_ratio=0.1, 1 epoch), only
+# subsample_fraction changed 0.1 -> 0.3. Same fixed shuffle seed (42), so this
+# 30% slice is a strict superset of the exact same rows exp008b/exp008c already
+# trained on, plus 20% new ones — a clean "more fresh data" test.
+#
+# Why: exp008c (3 epochs over the same 10% slice) made things WORSE (mean 0.427
+# -> 0.410) — classic overfitting (train_loss kept falling while mteb_mean_score
+# fell too), because it was 3 repeated passes over the same narrow 58K rows, not
+# new data. exp008b's 1-epoch/10% result (0.427) is still the best result so
+# far. This tests whether more *unique* data (not more passes) continues to help
+# before committing to a full-dataset run — same cheap-first discipline used
+# throughout this project (see e.g. exp004c's "more data at the same low LR"
+# test). Still 1 epoch, so no repetition risk.
+
+experiment:
+  number: 8
+  description: >
+    Same as exp008b (BERTurk native_pretrained, MSE recipe: lr=2e-5,
+    batch_size=64, warmup_ratio=0.1, 1 epoch), subsample_fraction bumped
+    0.1 -> 0.3 (same fixed seed, so a strict superset of the same rows) to test
+    whether more unique data continues to help before committing to a full run,
+    given exp008c showed 3 repeated epochs over the same 10% slice overfits
+    instead (mean dropped 0.427 -> 0.410).
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008d_mse_recipe_30pct
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008d_mse_recipe_30pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_reimers_gurevych_recipe_data_scale_test
+    data_fraction: "30pct"
+    loss_type: mse
+    compare_against: exp008b_native_berturk_mse_recipe_10pct
