@@ -15,7 +15,7 @@
 # GatedRepoError regardless of the token being valid.
 
 # %%
-CONFIG_PATH = "configs/experiments/exp008d_native_berturk_mse_recipe_30pct.yaml"  # <- only thing to change per run
+CONFIG_PATH = "configs/experiments/exp008e_native_berturk_mse_recipe_30pct_lower_lr.yaml"  # <- only thing to change per run
 
 # %%
 # --- Install dependencies ---

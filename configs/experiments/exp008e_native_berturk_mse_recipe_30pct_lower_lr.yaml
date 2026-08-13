@@ -1,0 +1,60 @@
+# exp008e — same as exp008d_native_berturk_mse_recipe_30pct.yaml (same 30%
+# fixed-seed superset of exp008b/c's rows, MSE loss, batch_size=64,
+# warmup_ratio=0.1, 1 epoch), only learning_rate changed: 2e-5 -> 5e-6 (4x
+# lower, same ratio exp004b used to test the same question in the contrastive
+# fine-tune series).
+#
+# Why: exp008d (30% data, 1 epoch, same LR as exp008b) landed at mean 0.413,
+# essentially the same as exp008c (10%, 3 epochs, same total step count —
+# ~2718 vs ~2719 steps) at 0.410, and both are worse than exp008b's ~906-step
+# run at 0.427. The WMB train_loss curve for that run (screenshot, ~2700 steps)
+# is smooth and monotonically decreasing the whole way — no instability, no
+# plateau-then-jump — which rules out an unstable/diverging training run as the
+# explanation. The more likely story: minimizing the literal MSE-to-teacher-
+# vector objective keeps improving past ~900 steps, but that improvement stops
+# translating into better MTEB task performance — a normal train/generalization
+# gap, not a bug. This tests whether a gentler learning rate lets more of the
+# available steps produce gains that actually generalize, the same way a lower
+# LR recovered most of exp004's damage in the contrastive fine-tune series
+# (exp004b). If this still plateaus around ~0.42-0.43, that's a stronger signal
+# this is close to the real ceiling for this recipe rather than a fixable
+# hyperparameter issue.
+
+experiment:
+  number: 8
+  description: >
+    Same as exp008d (BERTurk native_pretrained, MSE recipe, 30% fixed-seed
+    data, 1 epoch), learning_rate lowered 2e-5 -> 5e-6 (4x, same ratio as
+    exp004b) to test whether a gentler pace over the same step count produces
+    gains that generalize better, given exp008d's smooth-but-plateauing
+    train_loss curve and its mean score (0.413) landing at roughly the same
+    point as exp008c's equal-total-step-count run (0.410).
+
+model_cloning:
+  strategy: native_pretrained
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  pretrained_model: dbmdz/bert-base-turkish-128k-cased
+  max_seq_length: 512
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp008e_mse_recipe_30pct_lower_lr
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 5.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+    num_epochs: 1
+
+evaluation:
+  output_folder: results/exp008e_mse_recipe_30pct_lower_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: native_pretrained_lower_lr_test
+    data_fraction: "30pct"
+    loss_type: mse
+    compare_against: exp008d_native_berturk_mse_recipe_30pct
