@@ -3,6 +3,11 @@ dagshub
 mlflow
 pyyaml
 
+# Turkish morphological segmentation (exp009, compositional root+suffix embedding) —
+# pure-Python Zemberek3 port, no JVM bridge and no large model weights, so it's
+# safe to install and test locally too (unlike deepfocus/transformer-cloner below)
+zeyrek
+
 # Model construction pipeline (Steps 2-4) — heavy, only needed where training actually runs (Colab A100)
 sentence-transformers
 datasets
