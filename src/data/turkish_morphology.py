@@ -62,9 +62,21 @@ def _ensure_nltk_punkt_tab() -> None:
 
 def get_analyzer() -> Any:
     """Single source of truth for constructing a zeyrek analyzer — ensures
-    the punkt_tab resource is present first. Use this instead of calling
-    zeyrek.MorphAnalyzer() directly anywhere in this project."""
+    the punkt_tab resource is present first, and silences zeyrek's own
+    internal logging. Use this instead of calling zeyrek.MorphAnalyzer()
+    directly anywhere in this project.
+
+    zeyrek.rulebasedanalyzer logs a WARNING-level line for every candidate
+    parse it appends (confirmed the hard way: a real 1% Cosmos run over ~4
+    million unique words produced tens of millions of "APPENDING RESULT"
+    lines, which flooded stdout and crashed the Colab notebook page — this
+    was already happening in local testing too, at small enough scale to go
+    unnoticed rather than actually silenced). Raising this logger's level is
+    a library-noise fix, not a correctness change.
+    """
     _ensure_nltk_punkt_tab()
+    logging.getLogger("zeyrek").setLevel(logging.ERROR)
+
     import zeyrek
 
     return zeyrek.MorphAnalyzer()
