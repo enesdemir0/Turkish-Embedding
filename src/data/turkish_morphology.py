@@ -33,6 +33,43 @@ UNK_ROOT = "<unk_root>"
 UNK_SUFFIX = "<unk_suffix>"
 
 
+def _ensure_nltk_punkt_tab() -> None:
+    """zeyrek's word_tokenize() call (zeyrek/morphology.py's _tokenize_text)
+    goes through nltk's Turkish punkt_tab tokenizer, which is a separate data
+    resource nltk does NOT bundle or auto-download on pip install — confirmed
+    the hard way: a fresh Colab container raised a real LookupError on every
+    single analyze() call, which segment_word()'s per-word try/except then
+    silently swallowed as if every word were unanalyzable
+    (oov_fallback_fraction=1.0). Downloading it once, here, before any
+    analyzer is constructed, turns a silent 100%-fallback failure into either
+    a loud one-time download or (if it fails) a loud real exception, instead
+    of a misleading vocab-stats number.
+    """
+    import nltk
+
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+    except LookupError:
+        logger.info("Downloading NLTK punkt_tab resource (required by zeyrek's tokenizer)...")
+        if not nltk.download("punkt_tab", quiet=True):
+            raise RuntimeError(
+                "nltk.download('punkt_tab') failed — check network access. Without this "
+                "resource every zeyrek.analyze() call raises, which segment_word()'s "
+                "per-word fallback would otherwise mask as a misleading 100% "
+                "oov_fallback_fraction instead of a loud failure."
+            )
+
+
+def get_analyzer() -> Any:
+    """Single source of truth for constructing a zeyrek analyzer — ensures
+    the punkt_tab resource is present first. Use this instead of calling
+    zeyrek.MorphAnalyzer() directly anywhere in this project."""
+    _ensure_nltk_punkt_tab()
+    import zeyrek
+
+    return zeyrek.MorphAnalyzer()
+
+
 def segment_word(word: str, analyzer: Any) -> tuple[str, list[str], bool]:
     """Returns (root, [suffix, ...], is_fallback) for one word using zeyrek's
     first valid analysis candidate. is_fallback is True whenever zeyrek found
@@ -97,9 +134,7 @@ def build_root_suffix_vocab(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    import zeyrek
-
-    analyzer = zeyrek.MorphAnalyzer()
+    analyzer = get_analyzer()
 
     word_counts: Counter[str] = Counter()
     with corpus_path.open("r", encoding="utf-8") as f:

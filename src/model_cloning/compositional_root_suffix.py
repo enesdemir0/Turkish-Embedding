@@ -134,9 +134,9 @@ class RootSuffixEmbedding(InputModule):
 
     def _get_analyzer(self) -> Any:
         if self._analyzer is None:
-            import zeyrek
+            from src.data.turkish_morphology import get_analyzer
 
-            self._analyzer = zeyrek.MorphAnalyzer()
+            self._analyzer = get_analyzer()
         return self._analyzer
 
     def preprocess(
