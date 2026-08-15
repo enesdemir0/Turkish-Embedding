@@ -157,6 +157,10 @@ def build_root_suffix_vocab(
         raise ValueError(f"{corpus_path} produced zero words — refusing to build an empty vocab")
 
     distinct_words = list(word_counts.keys())
+    print(
+        f"build_root_suffix_vocab: {sum(word_counts.values())} total words, "
+        f"{len(distinct_words)} distinct — {'capping to ' + str(max_words) if max_words is not None else 'processing all of them'}"
+    )
     if max_words is not None:
         distinct_words = distinct_words[:max_words]
 
@@ -164,7 +168,15 @@ def build_root_suffix_vocab(
     suffixes: dict[str, int] = {UNK_SUFFIX: 0}
     oov_fallback_count = 0
 
-    for word in distinct_words:
+    # zeyrek's rule-based analyzer is slow per-word (confirmed the hard way: a
+    # real "1%" Cosmos row-subsample turned out to contain ~4 million distinct
+    # words, which at zeyrek's real per-word cost ran for over an hour with no
+    # visible progress, since nothing printed until this whole loop finished).
+    # print() (not logger.info, which Colab/Python don't show by default
+    # without explicit logging config) every N words so a run is never
+    # silently indistinguishable from hung again.
+    progress_interval = max(1, len(distinct_words) // 20)
+    for i, word in enumerate(distinct_words):
         root, word_suffixes, is_fallback = segment_word(word, analyzer)
         if root not in roots:
             roots[root] = len(roots)
@@ -173,6 +185,8 @@ def build_root_suffix_vocab(
                 suffixes[suffix] = len(suffixes)
         if is_fallback:
             oov_fallback_count += 1
+        if (i + 1) % progress_interval == 0 or (i + 1) == len(distinct_words):
+            print(f"build_root_suffix_vocab: segmented {i + 1}/{len(distinct_words)} words")
 
     unique_word_count = len(distinct_words)
     stats = {
