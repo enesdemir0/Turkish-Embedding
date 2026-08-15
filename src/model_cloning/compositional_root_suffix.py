@@ -79,6 +79,7 @@ class RootSuffixEmbedding(InputModule):
         "suffix_vocab_size",
         "hidden_dim",
         "max_suffixes_per_word",
+        "max_words_per_text",
         "roots",
         "suffixes",
     ]
@@ -92,6 +93,7 @@ class RootSuffixEmbedding(InputModule):
         roots: dict[str, int] | None = None,
         suffixes: dict[str, int] | None = None,
         max_suffixes_per_word: int = 8,
+        max_words_per_text: int = 128,
         analyzer: Any | None = None,
         **kwargs: Any,
     ) -> None:
@@ -100,6 +102,14 @@ class RootSuffixEmbedding(InputModule):
         self.suffix_vocab_size = suffix_vocab_size
         self.hidden_dim = hidden_dim
         self.max_suffixes_per_word = max_suffixes_per_word
+        # Word-level equivalent of a tokenizer's max_seq_length. Without this cap a
+        # long document (a full Wikipedia article in the distillation dataset, not a
+        # short sentence) produces an arbitrarily long word sequence — hit for real on
+        # Colab: a 12,143-word row crashed the tiny BERT body, whose
+        # max_position_embeddings/token_type_ids buffer default to 512. Every other
+        # student in this project truncates via its tokenizer's max_seq_length; this
+        # is the equivalent guard for a student with no tokenizer at all.
+        self.max_words_per_text = max_words_per_text
         self.roots = roots or {}
         self.suffixes = suffixes or {}
 
@@ -115,6 +125,7 @@ class RootSuffixEmbedding(InputModule):
         suffixes_path: str | Path,
         hidden_dim: int,
         max_suffixes_per_word: int = 8,
+        max_words_per_text: int = 128,
     ) -> "RootSuffixEmbedding":
         """Builds a fresh (randomly-initialized) module from the roots.json/
         suffixes.json produced by src/data/turkish_morphology.py's
@@ -130,6 +141,7 @@ class RootSuffixEmbedding(InputModule):
             roots=roots,
             suffixes=suffixes,
             max_suffixes_per_word=max_suffixes_per_word,
+            max_words_per_text=max_words_per_text,
         )
 
     def _get_analyzer(self) -> Any:
@@ -162,7 +174,7 @@ class RootSuffixEmbedding(InputModule):
         batch_suffix_ids: list[list[list[int]]] = []
 
         for text in texts:
-            words = text.split()
+            words = text.split()[: self.max_words_per_text]
             root_ids: list[int] = []
             suffix_ids: list[list[int]] = []
             for word in words:
@@ -259,6 +271,16 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
             straight into the body as inputs_embeds). Default 64.
         max_suffixes_per_word: pad/truncate length for a word's suffix chain
             (default 8).
+        max_words_per_text: word-level equivalent of a tokenizer's
+            max_seq_length — truncates each text to this many words before
+            composition (default 128). Without this, a long document (a full
+            Wikipedia article in the distillation dataset, not a short
+            sentence) produces an arbitrarily long word sequence, which
+            crashes the tiny BERT body's fixed-size position-embedding/
+            token_type_ids buffers once a sequence exceeds
+            max_position_embeddings. Kept in sync with tiny_transformer_config's
+            implicit BertConfig default (max_position_embeddings=512) below —
+            raise both together if you need longer sequences.
         tiny_transformer_config: dict of BertConfig kwargs (num_hidden_layers,
             num_attention_heads, intermediate_size) for a randomly-initialized
             smoke-test transformer body — deliberately NOT a pretrained
@@ -294,6 +316,7 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
 
         hidden_dim = self.params.get("hidden_dim", 64)
         max_suffixes_per_word = self.params.get("max_suffixes_per_word", 8)
+        max_words_per_text = self.params.get("max_words_per_text", 128)
         tiny_transformer_config = self.params.get("tiny_transformer_config", {})
         tokenizer_name_or_path = self.params.get(
             "tokenizer_name_or_path", "dbmdz/bert-base-turkish-128k-cased"
@@ -305,6 +328,7 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
             suffixes_path,
             hidden_dim=hidden_dim,
             max_suffixes_per_word=max_suffixes_per_word,
+            max_words_per_text=max_words_per_text,
         )
 
         num_attention_heads = tiny_transformer_config.get("num_attention_heads", 2)
@@ -313,11 +337,18 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
                 f"hidden_dim ({hidden_dim}) must be divisible by "
                 f"tiny_transformer_config.num_attention_heads ({num_attention_heads})"
             )
+        # max_position_embeddings must cover max_words_per_text (RootSuffixEmbedding's
+        # own truncation cap) — BERT's default (512) already does for the default
+        # max_words_per_text=128, but keep them explicitly tied so a larger
+        # max_words_per_text can never silently exceed the body's position buffer
+        # (the exact crash this whole guard exists to prevent).
+        max_position_embeddings = max(512, max_words_per_text)
         bert_config = BertConfig(
             hidden_size=hidden_dim,
             num_hidden_layers=tiny_transformer_config.get("num_hidden_layers", 2),
             num_attention_heads=num_attention_heads,
             intermediate_size=tiny_transformer_config.get("intermediate_size", 128),
+            max_position_embeddings=max_position_embeddings,
             vocab_size=8,  # never used — RootSuffixEmbedding always supplies inputs_embeds directly
         )
         tiny_body = BertModel(bert_config)
