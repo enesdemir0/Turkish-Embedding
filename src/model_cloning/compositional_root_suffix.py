@@ -211,7 +211,15 @@ class RootSuffixEmbedding(InputModule):
     def forward(self, features: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         root_vecs = self.root_embeddings(features["root_ids"])  # [B, L, H]
         suffix_vecs = self.suffix_embeddings(features["suffix_ids"])  # [B, L, S, H]
-        mask = features["suffix_mask"].unsqueeze(-1)  # [B, L, S, 1]
+        # suffix_mask is built in preprocess() as a fixed float32 tensor, independent
+        # of whatever precision the trainer casts this module's weights to (e.g.
+        # use_bf16=True). Mixing a bf16 embedding output with an fp32 mask silently
+        # upcasts the result back to float32 via PyTorch's type-promotion rules — so
+        # without this cast, `composed` stays float32 even when the rest of the model
+        # (including the downstream body's LayerNorm) was cast to bf16, crashing with
+        # a dtype mismatch. Casting the mask to root_vecs' dtype up front keeps every
+        # intermediate tensor in whatever precision this module is actually running in.
+        mask = features["suffix_mask"].unsqueeze(-1).to(root_vecs.dtype)  # [B, L, S, 1]
         suffix_sum = (suffix_vecs * mask).sum(dim=2)  # [B, L, H]
         suffix_count = mask.sum(dim=2).clamp(min=1.0)  # [B, L, 1]
         composed = root_vecs + suffix_sum / suffix_count  # [B, L, H]
