@@ -47,7 +47,14 @@ model_cloning:
   teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
   roots_path: ./vocabs/compositional_root_suffix_smoke/roots.json
   suffixes_path: ./vocabs/compositional_root_suffix_smoke/suffixes.json
-  hidden_dim: 64
+  # Must match the teacher's precomputed embedding dimension (768, EmbeddingGemma-300m's
+  # output width) — cosine.py's distillation loss compares the student's raw pooled
+  # output directly against teacher_embedding_final with no projection layer in between,
+  # unlike the paper's own architecture (which has a Dense 768->3072->768 layer to bridge
+  # exactly this kind of mismatch). A smaller hidden_dim here would need that same kind of
+  # projection layer added to compositional_root_suffix.py first — real future work if a
+  # smaller internal composition width is ever wanted, not needed for this smoke test.
+  hidden_dim: 768
   max_suffixes_per_word: 8
   tiny_transformer_config:
     num_hidden_layers: 2
