@@ -1,0 +1,69 @@
+# exp009b — same model as exp009_compositional_root_suffix_10pct.yaml, only
+# the distillation recipe changed. That run's train_loss barely moved (0.70 ->
+# 0.68 over 100 steps, real MLflow chart) and mteb_mean_score (0.3266) barely
+# beat the smoke test (0.3145) despite 10x more data and a bigger body — a
+# real underfitting signature, not a scale problem.
+#
+# Root cause (same diagnosis and fix already proven in the exp008 series):
+# distillation.strategy: cosine uses PAPER_HYPERPARAMETERS by default (cosine
+# loss, learning_rate=5e-5, batch_size=256, warmup_ratio=0.01) — tuned by the
+# paper's authors specifically for their weight-preserving Gemma clone, a
+# student that starts already close to the teacher's representation space.
+# This compositional model starts even further from that space than exp008's
+# BERTurk did (no pretraining at all, a novel input representation) — the
+# same recipe mismatch that made exp008 underfit (train_loss=0.674, stuck)
+# should be expected to hit even harder here. exp008b's fix (MSE loss, lower
+# LR, more warmup) took exp008 from 0.395 to 0.427 — this config applies the
+# identical fix, unchanged otherwise, as a clean single-variable test of
+# whether the same lever works here too.
+#
+# Reuses the exact same vocab/model architecture as exp009_..._10pct.yaml —
+# no new vocab-build pre-step needed if you already ran that config's Cell 5.
+#
+# Decision rule: if mteb_mean_score clearly beats exp009_..._10pct's 0.3266
+# AND train_loss shows a real, steady decrease (not another near-flat line),
+# the recipe was the problem and it's worth scaling data/vocab/body further
+# under this recipe. If it's still flat, that's a stronger signal the
+# architecture itself (not just the recipe) has a real ceiling at this scale.
+
+experiment:
+  number: 9
+  description: >
+    exp009 MSE-recipe test: same compositional root+suffix model as the
+    10pct cosine run, only the distillation hyperparameters changed (MSE
+    loss, lower LR, more warmup — the same fix that rescued exp008's
+    underfitting). Isolates whether exp009's flat train_loss was a recipe
+    mismatch or a real architecture ceiling.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_10pct/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_10pct/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009b_10pct_mse
+    subsample_fraction: 0.1
+    loss_type: mse
+    learning_rate: 2e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009b_10pct_mse
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_10pct_mse_recipe_fix
