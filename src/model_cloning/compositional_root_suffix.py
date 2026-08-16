@@ -117,6 +117,18 @@ class RootSuffixEmbedding(InputModule):
         self.suffix_embeddings = nn.Embedding(suffix_vocab_size, hidden_dim, padding_idx=UNK_SUFFIX_ID)
 
         self._analyzer = analyzer  # lazily created on first preprocess() call if still None
+        # zeyrek's rule-based analysis is slow per-word and preprocess() re-segments
+        # every word of every text on every call (once per batch, every epoch) with no
+        # memoization — confirmed a real bottleneck on Colab (a 1% Cosmos row-subsample
+        # had ~4M distinct words and took over an hour to segment once for vocab
+        # building; the same per-word cost applies live during training, uncached, and
+        # scales with total word occurrences across the whole run, not just distinct
+        # words). Since a real training corpus repeats the same words constantly, a
+        # plain dict cache turns most repeat occurrences into an O(1) lookup instead of
+        # a fresh zeyrek analysis. Deliberately NOT persisted via config_keys/save() —
+        # it's a runtime speed optimization, not learned/loadable state, and would only
+        # bloat a checkpoint.
+        self._segment_cache: dict[str, tuple[str, list[str]]] = {}
 
     @classmethod
     def from_vocab_files(
@@ -178,7 +190,12 @@ class RootSuffixEmbedding(InputModule):
             root_ids: list[int] = []
             suffix_ids: list[list[int]] = []
             for word in words:
-                root, word_suffixes, _is_fallback = segment_word(word, analyzer)
+                cached = self._segment_cache.get(word)
+                if cached is None:
+                    root, word_suffixes, _is_fallback = segment_word(word, analyzer)
+                    cached = (root, word_suffixes)
+                    self._segment_cache[word] = cached
+                root, word_suffixes = cached
                 root_ids.append(self.roots.get(root, UNK_ROOT_ID))
                 truncated = word_suffixes[: self.max_suffixes_per_word]
                 suffix_ids.append([self.suffixes.get(s, UNK_SUFFIX_ID) for s in truncated])

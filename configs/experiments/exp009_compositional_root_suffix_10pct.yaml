@@ -1,0 +1,85 @@
+# exp009 first REAL (non-toy) test of the compositional root+suffix
+# ("KOMBO-style") embedding — go/no-go signal on whether the idea itself is
+# worth pursuing further, not just plumbing (that was the smoke test,
+# exp009_compositional_root_suffix_smoke.yaml, which passed: mean 0.3145,
+# barely above the zero-distillation floor of 0.289 — expected, since it used
+# a 3,000-word toy vocab and a 2-layer random transformer for only 23 steps).
+#
+# Three things scaled up from the smoke test, each still cheap:
+#   - A real (not word-capped-at-3000) root/suffix vocabulary.
+#   - A slightly bigger (but still small) random-init transformer body — 4
+#     layers instead of 2, matching neither the toy smoke config nor a full
+#     12-layer BERT-base; a real step up in capacity while staying cheap.
+#   - 10% of the distillation dataset (matching this project's established
+#     "10%" cheap-first convention used for exp001/exp002/exp006/exp007's own
+#     first real signal, ~58,000 rows / ~227 steps at batch_size=256), up
+#     from the smoke test's 1% (5,800 rows / 23 steps).
+#
+# Decision rule (discussed directly with the user): if mteb_mean_score beats
+# the smoke test's 0.3145, that's a real signal the compositional idea is
+# worth investing further compute in (bigger vocab, bigger body, more data).
+# If it's flat or worse, that's a real signal this specific recipe (random
+# random-init body + this composition operator) may not be the right lever,
+# independent of a scale confound.
+#
+# roots_path/suffixes_path below must be built beforehand (no pipeline stage
+# owns this — see exp009 plan / SESSION_NOTES.md "Future work" #7). Uses a
+# separate, small Cosmos row-subsample (subsample_fraction is the row-count
+# knob) capped by max_words (the real speed control — zeyrek is slow
+# per-DISTINCT-word, so max_words bounds cost directly regardless of how many
+# rows/how many total word occurrences those rows contain):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_morphology import build_root_suffix_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
+#   build_root_suffix_vocab(
+#       './corpus/cosmos_10pct_vocab.txt',
+#       './vocabs/compositional_root_suffix_10pct',
+#       max_words=10000,
+#   )
+#   "
+#
+# Go/no-go check before spending any training time (same as the smoke test):
+#   assert oov_fallback_fraction < 0.5 and root_vocab_size > 10 and suffix_vocab_size > 10
+
+experiment:
+  number: 9
+  description: >
+    First real (non-toy) test of a KOMBO-style compositional root+suffix
+    embedding (TURKIS~1.MD section 2.2/5 item 5, SESSION_NOTES.md Future
+    work #7): runtime composition of root+suffix embedding tables via zeyrek
+    morphological segmentation, in front of a small randomly-initialized
+    4-layer transformer body. Real (10,000-word-capped) vocab, 10% of the
+    distillation dataset. Go/no-go signal: beat the smoke test's 0.3145 mean.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_10pct/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_10pct/suffixes.json
+  # Must match the teacher's precomputed embedding dimension (768,
+  # EmbeddingGemma-300m's output width) — see smoke config's own comment for
+  # why (cosine.py's loss has no projection layer to bridge a mismatch).
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009_10pct
+    subsample_fraction: 0.1
+
+evaluation:
+  output_folder: results/exp009_10pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_10pct_first_real_signal
