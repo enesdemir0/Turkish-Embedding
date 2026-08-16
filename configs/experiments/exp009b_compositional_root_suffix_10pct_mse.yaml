@@ -55,7 +55,7 @@ distillation:
     output_dir: ./distilled_model/exp009b_10pct_mse
     subsample_fraction: 0.1
     loss_type: mse
-    learning_rate: 2e-5
+    learning_rate: 2.0e-5  # PyYAML only parses exponential notation as a float if the mantissa has a decimal point ("2e-5" loads as the string "2e-5", not 2e-05 — a real crash hit on Colab)
     batch_size: 64
     warmup_ratio: 0.1
 
