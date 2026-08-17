@@ -1,0 +1,70 @@
+# exp009h — same model, vocab (60k, frequency-ranked), and data (30%) as
+# exp009g, ONLY learning_rate changed: 2.0e-5 -> 5.0e-6 (4x lower). This is
+# the LR test originally planned as exp009d, interrupted before it finished
+# so the vocab-selection bug could be investigated first — now finally run,
+# on top of the vocab fix + two rounds of vocab scaling that happened in the
+# meantime (10k -> 30k -> 60k, mean 0.3845 -> 0.4015 -> 0.4065, with vocab
+# gains now clearly diminishing: retrieval/STS kept improving broadly at
+# 60k, but classification softened — Turkish75NewsClassification dropped 8
+# points, a real trade-off, not noise).
+#
+# Rationale: every LR test so far in this project (exp008d -> exp008e) found
+# that a lower LR helps MOST when there's already a decent signal to refine
+# gently rather than overwrite. Now that the vocab covers real word frequency
+# properly (10.5% oov_fallback_fraction at 60k, down from the old bug's
+# effectively-worse coverage), this is a fairer test of the LR question than
+# the original exp009d attempt would have been, since that used the still-
+# buggy 10k insertion-order vocab.
+#
+# Reuses the exact same 60k vocab as exp009g — no new vocab-build pre-step
+# needed if it's still on disk in this Colab session.
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065.
+#   - Clearly higher -> LR is a real lever on top of the vocab fix; worth
+#     combining with more data or vocab next.
+#   - Flat or lower -> LR isn't the bottleneck at this scale; the body's own
+#     capacity (currently only 4 layers) becomes the more promising next
+#     lever, or 0.4065 may be close to this recipe/vocab/body combination's
+#     real ceiling.
+
+experiment:
+  number: 9
+  description: >
+    exp009 LR test (the originally-planned exp009d, run now on top of the
+    validated 60k vocab instead of the old buggy 10k vocab): same
+    compositional root+suffix model and 30% data as exp009g, only
+    learning_rate lowered 2e-5 -> 5e-6. Tests whether LR is still a real
+    lever once vocab quality is no longer confounding the comparison.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009h_60k_lower_lr
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 5.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009h_60k_lower_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_60k_lower_lr
