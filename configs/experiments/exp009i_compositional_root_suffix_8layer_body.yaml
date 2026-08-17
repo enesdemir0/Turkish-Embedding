@@ -1,0 +1,73 @@
+# exp009i — same vocab (60k, frequency-ranked), data (30%), and recipe
+# (learning_rate=2e-5, MSE loss) as exp009g (your best result so far, mean
+# 0.4065), ONLY the transformer body is bigger: num_hidden_layers 4 -> 8.
+# Single-variable test of model capacity, the one real lever not yet tried.
+#
+# Why this, not more data at the lower LR (rejected as the next step):
+# exp009h (same 30% data, lower LR=5e-6) underfit badly (mean 0.3868, worse;
+# train_loss only reached 0.1358 vs exp009g's 0.0371 in the same 2719 steps)
+# — a random-init model needs far more total gradient movement than a
+# pretrained one (BERTurk, exp008) to converge at a low LR, so testing lower
+# LR fairly would need scaling toward full data just to give it enough steps
+# — a much bigger, less certain compute bet than testing capacity directly.
+#
+# Why capacity is a real suspect: scaling vocab 30k -> 60k improved
+# retrieval/STS broadly but classification softened (Turkish75News dropped
+# 8 points) — the signature of a model being handed more information than it
+# has the capacity to use well across every task type, not a data or LR
+# problem.
+#
+# Reuses the exact same 60k vocab as exp009g/exp009h — no new vocab-build
+# pre-step needed if it's still on disk in this Colab session.
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065.
+#   - Clearly higher, especially if classification tasks (which softened at
+#     60k vocab) recover -> capacity was a real bottleneck; worth scaling
+#     the body further (more layers, or intermediate_size) before touching
+#     data/vocab/LR again.
+#   - Flat or lower -> capacity wasn't the (or wasn't the only) bottleneck at
+#     this scale; 0.4065 may be close to a real ceiling for this overall
+#     recipe without a much bigger data/compute investment.
+
+experiment:
+  number: 9
+  description: >
+    exp009 body-capacity test: same compositional root+suffix vocab (60k),
+    data (30%), and recipe (learning_rate=2e-5, MSE loss) as exp009g (best
+    result so far, mean 0.4065), only the transformer body deepened
+    4 -> 8 layers. Tests whether model capacity — not vocab, data, or LR —
+    is the real bottleneck, given the classification-side softness observed
+    when vocab scaled past 30k.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 8
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009i_8layer_body
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009i_8layer_body
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_8layer_body
