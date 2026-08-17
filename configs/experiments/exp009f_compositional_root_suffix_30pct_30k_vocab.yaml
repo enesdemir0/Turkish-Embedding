@@ -1,0 +1,78 @@
+# exp009f — same recipe and data as exp009e_..._30pct_fixed_vocab.yaml
+# (learning_rate=2e-5, 30% distillation data, MSE loss), ONLY the vocab is
+# bigger: max_words 10,000 -> 30,000, now that frequency-ranking is fixed
+# (exp009e confirmed a real, broad improvement from that fix alone: mean
+# 0.3845 vs exp009c's 0.3696 at the same LR/data with the old, insertion-order
+# vocab). Still only a 6.5% oov_fallback_fraction at 10,000 words — this
+# tests whether covering more of the real word-frequency tail closes more of
+# the remaining gap.
+#
+# Same underlying Cosmos corpus subsample as before (subsample_fraction=0.001
+# already yields 685,365 distinct words, comfortably more than 30,000 — no
+# need to widen the corpus sample itself, just raise max_words).
+#
+# New vocab-build pre-step (NEW output folder — exp009e's 10k vocab stays
+# untouched for comparison):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_morphology import build_root_suffix_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
+#   build_root_suffix_vocab(
+#       './corpus/cosmos_10pct_vocab.txt',
+#       './vocabs/compositional_root_suffix_30k',
+#       max_words=30000,
+#   )
+#   "
+#
+# Decision rule: compare mteb_mean_score against exp009e's 0.3845 (same
+# LR/data, 10k vocab).
+#   - Clearly higher -> vocab size is still a real lever; worth pushing
+#     further (bigger max_words, or widening the corpus subsample itself) or
+#     scaling to full distillation data next.
+#   - Flat or diminishing -> vocab coverage is approaching its useful ceiling
+#     at this corpus/architecture combination; the LR question (exp009d,
+#     interrupted before completing) or the transformer body's own capacity
+#     become the more promising next levers instead.
+
+experiment:
+  number: 9
+  description: >
+    exp009 vocab-size test: same compositional root+suffix model, recipe
+    (learning_rate=2e-5, MSE loss), and 30% data as exp009e (which confirmed
+    the frequency-ranking vocab fix was a real, broad improvement), only
+    max_words raised 10,000 -> 30,000. Tests whether covering more of the
+    real word-frequency tail closes more of the remaining gap toward
+    competitive baselines.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_30k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_30k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009f_30pct_30k_vocab
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009f_30pct_30k_vocab
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_30pct_30k_vocab
