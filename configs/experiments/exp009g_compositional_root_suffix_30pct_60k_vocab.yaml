@@ -1,0 +1,81 @@
+# exp009g — same recipe and data as exp009e/exp009f (learning_rate=2e-5, 30%
+# distillation data, MSE loss), ONLY the vocab is bigger again: max_words
+# 30,000 -> 60,000 (a smaller, cheaper step than jumping straight to 100,000
+# — deliberately chosen to check the trend is still strong before paying for
+# a bigger build, given Turkish word frequency is Zipfian and each additional
+# vocab chunk covers a shrinking amount of real usage).
+#
+# Continues the confirmed trend: 10k vocab (fixed frequency-ranking) ->
+# 0.3845, 30k vocab -> 0.4015, both real, broad, mostly-retrieval/STS-
+# concentrated improvements with train_loss staying roughly flat (0.0375 ->
+# 0.0379) — confirming the gains come from genuine word-coverage
+# improvements, not just fitting the training objective harder.
+#
+# Same underlying Cosmos corpus subsample as before (subsample_fraction=0.001
+# yields 685,365 distinct words — comfortably enough for 60,000).
+#
+# New vocab-build pre-step (NEW output folder — exp009f's 30k vocab stays
+# untouched for comparison):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_morphology import build_root_suffix_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
+#   build_root_suffix_vocab(
+#       './corpus/cosmos_10pct_vocab.txt',
+#       './vocabs/compositional_root_suffix_60k',
+#       max_words=60000,
+#   )
+#   "
+#
+# Decision rule: compare mteb_mean_score against exp009f's 0.4015 (same
+# LR/data, 30k vocab).
+#   - Clearly higher, similar magnitude to the 10k->30k jump -> the trend is
+#     still strong; worth pushing to 100k+ next.
+#   - Higher but visibly smaller gain than the 10k->30k jump -> diminishing
+#     returns setting in; still worth one more step, but start weighing other
+#     levers (LR, body capacity) in parallel rather than only vocab size.
+#   - Flat or lower -> vocab coverage has plateaued at this corpus/
+#     architecture combination; move to the LR question or body capacity.
+
+experiment:
+  number: 9
+  description: >
+    exp009 vocab-size test: same compositional root+suffix model, recipe
+    (learning_rate=2e-5, MSE loss), and 30% data as exp009f, only max_words
+    raised 30,000 -> 60,000 (a smaller step than 100k, to check for
+    diminishing returns before committing to a bigger, more expensive vocab
+    build). exp009f's 0.4015 is the closest result yet to stock BERTurk's
+    0.4838 (~0.08 gap, down from ~0.17 several iterations ago).
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009g_30pct_60k_vocab
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009g_30pct_60k_vocab
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_30pct_60k_vocab
