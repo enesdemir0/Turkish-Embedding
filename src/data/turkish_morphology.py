@@ -156,13 +156,21 @@ def build_root_suffix_vocab(
     if not word_counts:
         raise ValueError(f"{corpus_path} produced zero words — refusing to build an empty vocab")
 
-    distinct_words = list(word_counts.keys())
+    # word_counts.keys() would preserve insertion order (first-seen order while
+    # scanning the file), NOT frequency order — a real bug caught after already
+    # running with it: `distinct_words[:max_words]` on that ordering picks
+    # whichever words happened to appear first in the file, not the most common
+    # ones. Since real language usage is Zipfian, this could silently exclude
+    # genuinely common, high-value words from the vocab (more UNK fallback
+    # during actual training) while including rare one-off words purely because
+    # they showed up early. most_common(max_words) selects by actual frequency
+    # instead, so a capped vocab covers as much real usage as possible.
+    ranked_words = [word for word, _count in word_counts.most_common()]
     print(
         f"build_root_suffix_vocab: {sum(word_counts.values())} total words, "
-        f"{len(distinct_words)} distinct — {'capping to ' + str(max_words) if max_words is not None else 'processing all of them'}"
+        f"{len(ranked_words)} distinct — {'capping to ' + str(max_words) + ' most frequent' if max_words is not None else 'processing all of them'}"
     )
-    if max_words is not None:
-        distinct_words = distinct_words[:max_words]
+    distinct_words = ranked_words[:max_words] if max_words is not None else ranked_words
 
     roots: dict[str, int] = {UNK_ROOT: 0}
     suffixes: dict[str, int] = {UNK_SUFFIX: 0}

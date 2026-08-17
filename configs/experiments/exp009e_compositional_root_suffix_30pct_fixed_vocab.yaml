@@ -1,0 +1,84 @@
+# exp009e — same recipe and data as exp009c_..._30pct_mse.yaml (learning_rate
+# unchanged at 2e-5, 30% distillation data), ONLY the vocab is different.
+#
+# Real bug found and fixed in src/data/turkish_morphology.py's
+# build_root_suffix_vocab(): distinct_words[:max_words] was selecting the
+# first max_words words encountered in FILE order (Counter.keys() preserves
+# insertion order), not the most frequent ones. Since real language usage is
+# Zipfian, this could have silently excluded genuinely common, high-value
+# Turkish words from the vocab (more UNK fallback during real training) while
+# including rare one-off words purely because they appeared early in the
+# corpus file. Fixed to rank by Counter.most_common(max_words) instead —
+# verified locally with a synthetic Counter (a word appearing 4x now
+# correctly outranks a word seen earlier but only once).
+#
+# exp009c's plateau (0.3696, flat vs exp009b's 10pct 0.3701 despite train_loss
+# still improving) was tested BEFORE this fix — that comparison used the
+# insertion-order vocab. This run isolates whether vocab quality (not LR) was
+# the real bottleneck: same 30% data, same learning_rate=2e-5 as exp009c,
+# only a vocab rebuilt with the frequency fix.
+#
+# New vocab-build pre-step (note: NEW output folder, so exp009c/exp009d's
+# vocab files are untouched for comparison — re-run Cells 1-6-equivalent
+# with this instead if starting a fresh Colab session):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_morphology import build_root_suffix_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
+#   build_root_suffix_vocab(
+#       './corpus/cosmos_10pct_vocab.txt',
+#       './vocabs/compositional_root_suffix_10pct_v2',
+#       max_words=10000,
+#   )
+#   "
+#
+# Decision rule: compare mteb_mean_score against exp009c's 0.3696 (same LR,
+# same data fraction, old vocab).
+#   - Clearly higher -> vocab quality was a real bottleneck; worth building an
+#     even bigger frequency-ranked vocab next (raise max_words) before
+#     touching LR again.
+#   - Flat or lower -> vocab selection wasn't the (or wasn't the only)
+#     bottleneck; go back to the LR question (exp009d) or consider a capacity
+#     ceiling in the transformer body itself.
+
+experiment:
+  number: 9
+  description: >
+    exp009 vocab-fix test: same compositional root+suffix model, same
+    learning_rate=2e-5 and 30% data as exp009c, only the root/suffix vocab
+    rebuilt with build_root_suffix_vocab's frequency-ranking fix (previously
+    selected by file-order, not actual word frequency). Isolates whether
+    exp009c's plateau was a vocab-quality problem rather than an LR problem.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_10pct_v2/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_10pct_v2/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009e_30pct_fixed_vocab
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009e_30pct_fixed_vocab
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_30pct_fixed_vocab
