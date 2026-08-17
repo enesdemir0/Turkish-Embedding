@@ -1,0 +1,72 @@
+# exp009d — same model + data as exp009c_..._30pct_mse.yaml (which plateaued:
+# mean 0.3696, essentially flat vs exp009b's 10pct 0.3701, even though
+# train_loss kept improving to 0.039 — the same "dose" signature exp008d hit).
+# Only learning_rate changed: 2.0e-5 -> 5.0e-6 (4x lower), mirroring exactly
+# the move that took exp008 from 0.4131 (30pct, flat/worse) to 0.4655 (30pct,
+# lower LR, exp008's best result).
+#
+# Honest caveat, discussed directly with the user before running this: the
+# mechanism that made lower LR help exp008 was PROTECTING an already-good
+# pretrained representation (BERTurk) from being overwritten too fast. This
+# compositional model starts from random weights — there is no existing good
+# representation to protect — so that specific mechanism may not transfer.
+# Two other real candidate explanations for exp009c's plateau were NOT ruled
+# out by this test alone: a vocab-capacity ceiling (10,000-word cap, real
+# UNK-fallback fraction not yet checked) and a task-difficulty ceiling
+# independent of LR. This run isolates LR as a single variable; it does not
+# by itself distinguish between these explanations if it fails to help.
+#
+# Reuses the exact same vocab as exp009c (10pct-built vocab, same folder) —
+# no new vocab-build pre-step needed if it's still on disk in this session.
+#
+# Decision rule: compare mteb_mean_score against exp009c's 0.3696.
+#   - Clearly higher -> LR was a real lever here too; worth scaling further
+#     under this lower LR (mirroring exp008's own successful sequence).
+#   - Flat or lower -> LR was not the bottleneck; check the real
+#     oov_fallback_fraction from the vocab_stats.json this run's Cell 5/6
+#     already produced (build_root_suffix_vocab's "GO: oov_fallback_fraction=
+#     ..." print) — a real capacity ceiling (too many words falling back to
+#     <unk_root>) would point at a bigger vocab as the next lever instead of
+#     more LR/data tuning.
+
+experiment:
+  number: 9
+  description: >
+    exp009 LR-lowering test: same compositional root+suffix model and 30%
+    data as exp009c (which plateaued despite a healthy, still-improving
+    train_loss), only learning_rate lowered 2e-5 -> 5e-6, mirroring exp008's
+    own exp008d -> exp008e fix. Tests whether the same lever transfers to a
+    random-init (not pretrained) architecture.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_10pct/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_10pct/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009d_30pct_lower_lr
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 5.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009d_30pct_lower_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_30pct_lower_lr
