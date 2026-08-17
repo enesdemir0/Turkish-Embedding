@@ -1,0 +1,75 @@
+# exp009c — same model + recipe as exp009b_..._10pct_mse.yaml (which fixed
+# the underfitting: real steady loss decline 0.23->0.05, mteb_mean_score
+# 0.3701, up from 0.3266 at the same 10% data under the mismatched cosine
+# recipe). Only subsample_fraction changed: 0.1 -> 0.3, matching this
+# project's own established de-risking step before a full run (exactly how
+# exp008d tested 30% before exp008g's full run).
+#
+# Real, honest caveat from exp008's own history: scaling data at a FIXED
+# learning rate is not guaranteed to help — exp008d (30% at the same LR as
+# exp008b) actually scored slightly WORSE than exp008b's 10% run (0.4131 vs
+# 0.4265), because more data at a fixed LR means more total gradient updates
+# ("dose"), not automatically better generalization. Only after also lowering
+# the LR (exp008e) did more data clearly help (0.4655). This run intentionally
+# keeps learning_rate unchanged from exp009b as a clean single-variable test
+# of data scaling alone — if the score goes down or is flat, that is itself a
+# real, informative result (same lesson as exp008d), not a wasted run; the
+# next lever to try would be lowering the LR the same way exp008e did, not
+# giving up on more data.
+#
+# Reuses the exact same vocab as exp009_..._10pct.yaml / exp009b — no new
+# vocab-build pre-step needed if it's still on disk in this Colab session.
+#
+# Decision rule: compare mteb_mean_score against exp009b's 0.3701.
+#   - Clearly higher -> the improving trend continues, worth timing this run
+#     for a real full-run estimate and considering scaling further (bigger
+#     vocab, more data, possibly a bigger body).
+#   - Flat or lower -> same "dose" issue exp008d hit; try lowering
+#     learning_rate next (mirroring exp008e) before concluding data doesn't
+#     help, and before spending a full run's budget.
+# Also worth timing this run for a real (not extrapolated) full-run estimate,
+# given zeyrek's uncached-word cost is a real unknown at larger scale (see
+# exp009c's own Colab notebook cells for the go/no-go on timing).
+
+experiment:
+  number: 9
+  description: >
+    exp009 data-scaling test: same compositional root+suffix model and MSE
+    recipe as the 10pct run (exp009b, which fixed the earlier underfitting),
+    only subsample_fraction raised 0.1 -> 0.3. Tests whether the improving
+    trend (0.3145 -> 0.3266 -> 0.3701) continues with more data at a fixed
+    LR, or hits the same "dose" ceiling exp008d found for a different
+    architecture under the same kind of scaling.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_10pct/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_10pct/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009c_30pct_mse
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009c_30pct_mse
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_30pct_mse_data_scaling
