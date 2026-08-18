@@ -1,0 +1,85 @@
+# exp009k — same model/vocab (60k) as exp009j (full data), ONLY
+# learning_rate lowered 2.0e-5 -> 5.0e-6, matching exp009h's LR. Directly
+# combines the two separate failure modes already diagnosed:
+#   - exp009h (lr=5e-6, 30% data/2,719 steps): underfit -- not enough steps
+#     for this LR to converge (train_loss stuck at 0.1358, mean 0.3868, worse
+#     than exp009g).
+#   - exp009j (lr=2e-5, full data/9,063 steps): overtrained -- same LR as the
+#     best 30%-data run but 3.3x more steps meant far more total "dose" at a
+#     high effective LR before the schedule decayed, which over-specialized
+#     the model toward the literal MSE-to-teacher-vector objective
+#     (train_loss went LOWER, to 0.0319) at the direct expense of retrieval
+#     generalization (broad, large collapse: SciFactTR -0.103, XQuADRetrieval
+#     -0.083, TQuadRetrieval -0.077, mean 0.3889, worse than exp009g).
+# This run gives the gentler LR the extra steps it needed without the high-LR
+# overtraining that hurt the last run -- a real, reasoned hypothesis, not
+# another blind hyperparameter guess.
+#
+# Reuses the exact same 60k vocab as exp009g/h/i/j -- no new vocab-build
+# pre-step needed if it's still on disk in this Colab session.
+#
+# Real timing: full data is ~9,063 steps regardless of LR (same step count as
+# exp009j) -- expect a similarly long run, ~3.7-4+ hours. This is the
+# heaviest single commitment in the exp009 series so far.
+#
+# AGREED STOPPING RULE (discussed directly with the user before running
+# this): if this does NOT beat exp009g's 0.4065, stop tuning this recipe
+# (vocab/LR/body-depth/data-scale within the current architecture) and
+# either (a) report 0.4065 as the real, final result for this track -- a
+# legitimate finding regardless of the user's originally-stated 0.45 bar --
+# or (b) make a genuinely structural change instead of another hyperparameter
+# search, e.g. an order-aware suffix composition operator (currently just
+# root_vector + mean(suffix_vectors), which discards suffix order even
+# though it carries real grammatical meaning in Turkish -- flagged as real
+# future work in compositional_root_suffix.py's own docstring).
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065 (best
+# result so far, 30% data, same LR family).
+#   - Clearly higher -> the dose-matching hypothesis was correct; this
+#     becomes the new best result and a real, reportable outcome.
+#   - Flat or lower -> per the agreed stopping rule above, stop tuning this
+#     recipe further.
+
+experiment:
+  number: 9
+  description: >
+    exp009 properly-tuned full-data run: same compositional root+suffix
+    model, vocab (60k), and body (4 layers) as exp009j, only learning_rate
+    lowered 2e-5 -> 5e-6 to match the much larger full-data step count
+    (9,063 vs 2,719 at 30%). Directly tests whether combining exp009h's
+    under-trained LR with exp009j's under-tuned full-data run fixes both
+    failure modes at once. Per the agreed stopping rule, this is the last
+    hyperparameter-tuning attempt on this recipe before either reporting
+    0.4065 as final or making a structural change instead.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009k_full_data_lower_lr
+    loss_type: mse
+    learning_rate: 5.0e-6
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009k_full_data_lower_lr
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_full_data_lower_lr
