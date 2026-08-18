@@ -1,0 +1,70 @@
+# exp009l smoke test — cheap-first plumbing check for the new "kombo_fold"
+# composition operator (order-aware sequential fold adapted from the KOMBO
+# paper, arXiv:2604.23948) added to compositional_root_suffix.py, BEFORE
+# committing to a real Colab comparison run. Identical scale to the original
+# exp009 smoke test (tiny vocab, tiny 2-layer randomly-initialized body, tiny
+# distillation subsample) — the ONLY changed variable vs that smoke test is
+# model_cloning.composition_operator: kombo_fold instead of the implicit
+# default ("mean"). NOT a real experiment result — expected to score badly;
+# only the plumbing (new fold_conv path running end-to-end inside the real
+# distil-trainer, save/reload, dtype handling under bf16) is under test.
+# Local pure-tensor unit checks (shape/dtype, gradient flow, degenerate
+# zero-suffix case, order-sensitivity, save/reload numeric round-trip, zero
+# regression to the "mean" path) already passed offline before this — see
+# SESSION_NOTES_EXP009.md.
+#
+# Reuses the same tiny vocab already built for the original exp009 smoke
+# test (./vocabs/compositional_root_suffix_smoke) — no new vocab-build
+# needed, since the operator change doesn't touch vocab building at all.
+#
+# Go/no-go signal before scaling to the real exp009g-scale comparison run:
+#   1. model_cloning.build() completes, returns a real SentenceTransformer
+#      with a kombo_fold RootSuffixEmbedding (fold_conv present), and
+#      .save()/reload round-trips inside distil-trainer's own internal path
+#      on Colab (not just the offline pure-tensor check already done)
+#   2. distillation runs to completion on the tiny subsample without
+#      exceptions — in particular, confirms the fold_conv path tolerates
+#      bf16 (use_bf16=True, inherited from PAPER_HYPERPARAMETERS) without
+#      reintroducing the dtype-mismatch bug already fixed for the "mean"
+#      path (see SESSION_NOTES_EXP009.md bug #2)
+#   3. evaluation runs to completion (score itself is expected to be
+#      near-random, same as the original exp009 smoke test)
+
+experiment:
+  number: 9
+  description: >
+    Cheap-first smoke test of the new kombo_fold composition operator
+    (order-aware sequential fold adapted from KOMBO, arXiv:2604.23948) added
+    to compositional_root_suffix.py. Same tiny scale as the original exp009
+    smoke test; only composition_operator changed. Plumbing check only, not
+    a real result.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_smoke/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_smoke/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  composition_operator: kombo_fold
+  tiny_transformer_config:
+    num_hidden_layers: 2
+    num_attention_heads: 2
+    intermediate_size: 128
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009l_smoke
+    subsample_fraction: 0.01
+
+evaluation:
+  output_folder: results/exp009l_smoke
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_kombo_fold_smoke_test

@@ -58,14 +58,31 @@ UNK_SUFFIX_ID = 0
 
 
 class RootSuffixEmbedding(InputModule):
-    """Composes a word's embedding at runtime as
-    ``root_embedding + mean(suffix_embeddings)`` — order-invariant,
-    parameter-light. Deliberately the simplest defensible operator for a
-    first smoke test: getting the mechanism plumbed end-to-end correctly
-    matters more than linguistic correctness on attempt #1. A word with zero
-    suffixes degenerates to exactly its root embedding, no special-casing
-    needed. A suffix-order-aware combinator (concat+MLP, small RNN/attention)
-    is real future work once this plumbing is validated.
+    """Composes a word's embedding at runtime via one of two operators
+    (``composition_operator``):
+
+    - ``"mean"`` (default): ``root_embedding + mean(suffix_embeddings)`` —
+      order-invariant, parameter-light. The original, simplest defensible
+      operator, chosen for the first smoke test to isolate "does the
+      mechanism work" from "is the operator good" (see exp009's session
+      notes). A word with zero suffixes degenerates to exactly its root
+      embedding, no special-casing needed.
+    - ``"kombo_fold"``: an order-aware operator adapted from the KOMBO paper
+      (arXiv:2604.23948)'s Korean Jamo-composition combinator. KOMBO's own
+      mechanic assumes a fixed 3-slot structure (chosung/joongsung/jongsung)
+      that doesn't translate directly to a variable-length Turkish suffix
+      chain, so this generalizes it to a **sequential left-to-right fold**:
+      starting from the root vector, each suffix (in the analyzer's own
+      chain order — case/tense/possessive suffixes carry real grammatical
+      meaning from their stacking order, unlike the order-blind ``"mean"``
+      operator) is folded in one at a time via a single small shared
+      depthwise ``nn.Conv1d(hidden_dim, hidden_dim, kernel_size=2,
+      groups=hidden_dim)`` — the direct analogue of KOMBO's "concat + small
+      conv" jongsung-folding step, reused at every fold position instead of
+      once for a fixed 3rd slot. Padded suffix positions carry the running
+      state forward unchanged instead of folding, so variable-length chains
+      and the zero-suffix degenerate case (state stays exactly the root
+      vector) both fall out without special-casing.
 
     Sequences are built at the WORD level (whitespace/punctuation split), not
     subword level — a deliberate, structural difference from every other
@@ -80,10 +97,13 @@ class RootSuffixEmbedding(InputModule):
         "hidden_dim",
         "max_suffixes_per_word",
         "max_words_per_text",
+        "composition_operator",
         "roots",
         "suffixes",
     ]
     save_in_root = True  # index 0 in the modules list; matches Transformer/StaticEmbedding convention
+
+    COMPOSITION_OPERATORS = {"mean", "kombo_fold"}
 
     def __init__(
         self,
@@ -94,14 +114,21 @@ class RootSuffixEmbedding(InputModule):
         suffixes: dict[str, int] | None = None,
         max_suffixes_per_word: int = 8,
         max_words_per_text: int = 128,
+        composition_operator: str = "mean",
         analyzer: Any | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
+        if composition_operator not in self.COMPOSITION_OPERATORS:
+            raise ValueError(
+                f"composition_operator must be one of {sorted(self.COMPOSITION_OPERATORS)}, "
+                f"got {composition_operator!r}"
+            )
         self.root_vocab_size = root_vocab_size
         self.suffix_vocab_size = suffix_vocab_size
         self.hidden_dim = hidden_dim
         self.max_suffixes_per_word = max_suffixes_per_word
+        self.composition_operator = composition_operator
         # Word-level equivalent of a tokenizer's max_seq_length. Without this cap a
         # long document (a full Wikipedia article in the distillation dataset, not a
         # short sentence) produces an arbitrarily long word sequence — hit for real on
@@ -115,6 +142,19 @@ class RootSuffixEmbedding(InputModule):
 
         self.root_embeddings = nn.Embedding(root_vocab_size, hidden_dim, padding_idx=UNK_ROOT_ID)
         self.suffix_embeddings = nn.Embedding(suffix_vocab_size, hidden_dim, padding_idx=UNK_SUFFIX_ID)
+
+        # Only constructed for the "kombo_fold" operator, so the "mean" operator's
+        # param count/checkpoint shape stays byte-for-byte unchanged (every prior
+        # exp009-exp009k config/checkpoint still loads and behaves identically, since
+        # composition_operator defaults to "mean"). Depthwise (groups=hidden_dim) so
+        # each channel gets its own tiny 2-tap [state, suffix] combination weight —
+        # kernel_size=2 folds the stacked pair back down to length 1, the direct
+        # analogue of KOMBO's "concat + kernel 2x1 conv" jongsung-folding step.
+        self.fold_conv = (
+            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=2, groups=hidden_dim)
+            if composition_operator == "kombo_fold"
+            else None
+        )
 
         self._analyzer = analyzer  # lazily created on first preprocess() call if still None
         # zeyrek's rule-based analysis is slow per-word and preprocess() re-segments
@@ -138,6 +178,7 @@ class RootSuffixEmbedding(InputModule):
         hidden_dim: int,
         max_suffixes_per_word: int = 8,
         max_words_per_text: int = 128,
+        composition_operator: str = "mean",
     ) -> "RootSuffixEmbedding":
         """Builds a fresh (randomly-initialized) module from the roots.json/
         suffixes.json produced by src/data/turkish_morphology.py's
@@ -154,6 +195,7 @@ class RootSuffixEmbedding(InputModule):
             suffixes=suffixes,
             max_suffixes_per_word=max_suffixes_per_word,
             max_words_per_text=max_words_per_text,
+            composition_operator=composition_operator,
         )
 
     def _get_analyzer(self) -> Any:
@@ -237,15 +279,41 @@ class RootSuffixEmbedding(InputModule):
         # a dtype mismatch. Casting the mask to root_vecs' dtype up front keeps every
         # intermediate tensor in whatever precision this module is actually running in.
         mask = features["suffix_mask"].unsqueeze(-1).to(root_vecs.dtype)  # [B, L, S, 1]
-        suffix_sum = (suffix_vecs * mask).sum(dim=2)  # [B, L, H]
-        suffix_count = mask.sum(dim=2).clamp(min=1.0)  # [B, L, 1]
-        composed = root_vecs + suffix_sum / suffix_count  # [B, L, H]
+
+        if self.composition_operator == "kombo_fold":
+            composed = self._compose_kombo_fold(root_vecs, suffix_vecs, mask)
+        else:
+            suffix_sum = (suffix_vecs * mask).sum(dim=2)  # [B, L, H]
+            suffix_count = mask.sum(dim=2).clamp(min=1.0)  # [B, L, 1]
+            composed = root_vecs + suffix_sum / suffix_count  # [B, L, H]
 
         features["inputs_embeds"] = composed
         features.pop("root_ids", None)
         features.pop("suffix_ids", None)
         features.pop("suffix_mask", None)
         return features
+
+    def _compose_kombo_fold(
+        self, root_vecs: torch.Tensor, suffix_vecs: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Sequential left-to-right fold over the ordered suffix chain — see
+        class docstring for the KOMBO-adapted rationale. `mask` is already
+        cast to root_vecs.dtype by the caller (forward())."""
+        batch, seq_len, hidden = root_vecs.shape
+        num_suffix_slots = suffix_vecs.shape[2]
+        state = root_vecs
+        for k in range(num_suffix_slots):
+            suffix_k = suffix_vecs[:, :, k, :]  # [B, L, H]
+            mask_k = mask[:, :, k, :]  # [B, L, 1]
+            # Conv1d expects [N, C_in, spatial]; fold each (batch, word-position) pair
+            # independently, treating hidden_dim as channels and the stacked
+            # [state, suffix] pair as a length-2 spatial axis (kernel_size=2 collapses
+            # it back to length 1).
+            stacked = torch.stack([state, suffix_k], dim=-1)  # [B, L, H, 2]
+            stacked = stacked.reshape(batch * seq_len, hidden, 2)
+            folded = self.fold_conv(stacked).reshape(batch, seq_len, hidden)  # [B, L, H]
+            state = mask_k * folded + (1.0 - mask_k) * state
+        return state
 
     def get_embedding_dimension(self) -> int:
         return self.hidden_dim
@@ -306,6 +374,10 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
             max_position_embeddings. Kept in sync with tiny_transformer_config's
             implicit BertConfig default (max_position_embeddings=512) below —
             raise both together if you need longer sequences.
+        composition_operator: "mean" (default, order-invariant
+            root+mean(suffixes)) or "kombo_fold" (order-aware sequential fold
+            adapted from the KOMBO paper — see RootSuffixEmbedding's
+            docstring for the full rationale).
         tiny_transformer_config: dict of BertConfig kwargs (num_hidden_layers,
             num_attention_heads, intermediate_size) for a randomly-initialized
             smoke-test transformer body — deliberately NOT a pretrained
@@ -342,6 +414,7 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
         hidden_dim = self.params.get("hidden_dim", 64)
         max_suffixes_per_word = self.params.get("max_suffixes_per_word", 8)
         max_words_per_text = self.params.get("max_words_per_text", 128)
+        composition_operator = self.params.get("composition_operator", "mean")
         tiny_transformer_config = self.params.get("tiny_transformer_config", {})
         tokenizer_name_or_path = self.params.get(
             "tokenizer_name_or_path", "dbmdz/bert-base-turkish-128k-cased"
@@ -354,6 +427,7 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
             hidden_dim=hidden_dim,
             max_suffixes_per_word=max_suffixes_per_word,
             max_words_per_text=max_words_per_text,
+            composition_operator=composition_operator,
         )
 
         num_attention_heads = tiny_transformer_config.get("num_attention_heads", 2)
@@ -388,10 +462,11 @@ class CompositionalRootSuffixStrategy(ModelCloningStrategy):
 
         logger.info(
             "Built compositional_root_suffix student: root_vocab=%d suffix_vocab=%d "
-            "hidden_dim=%d tiny_transformer_config=%s",
+            "hidden_dim=%d composition_operator=%s tiny_transformer_config=%s",
             front_end.root_vocab_size,
             front_end.suffix_vocab_size,
             hidden_dim,
+            composition_operator,
             tiny_transformer_config,
         )
         return model

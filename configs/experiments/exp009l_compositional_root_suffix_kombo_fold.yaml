@@ -1,0 +1,75 @@
+# exp009l — real single-variable comparison of the new "kombo_fold"
+# composition operator against exp009g's 0.4065 (current best, and the
+# recipe hyperparameter-tuning stopping point — see SESSION_NOTES_EXP009.md
+# "Agreed stopping rule"). Byte-identical to exp009g
+# (exp009g_compositional_root_suffix_30pct_60k_vocab.yaml) — same 60k vocab,
+# same 30% data, same 4-layer body, same lr=2e-5 MSE recipe — the ONLY
+# changed line is model_cloning.composition_operator: kombo_fold (exp009g
+# left it unset, which defaults to "mean"). This isolates the composition
+# operator itself as the only variable under test, per the plan agreed with
+# the user after real KOMBO paper research (arXiv:2604.23948) confirmed
+# KOMBO's own operator is not simple averaging but a structured "concat +
+# small conv" fold — see SESSION_NOTES_EXP009.md's KOMBO research section
+# for the full rationale and the Turkish-adapted sequential-fold design.
+#
+# Run this ONLY after exp009l's smoke config
+# (exp009l_compositional_root_suffix_kombo_fold_smoke.yaml) has passed on
+# Colab — go/no-go plumbing check for the new operator path, not yet done
+# for this real scale.
+#
+# Reuses the same 60k vocab already built for exp009g/h/i/j/k
+# (./vocabs/compositional_root_suffix_60k) — no new vocab-build needed,
+# since the operator change doesn't touch vocab building at all.
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065.
+# Recalibrated expectation (discussed with the user after the KOMBO paper
+# research): a modest, real gain is the honest expectation, not a KOMBO-sized
+# leap (KOMBO's own +2.11% result came from ~100x more compute/data than
+# anything feasible here). Reaching the user's stated 0.45 bar (0.50 as an
+# even-better outcome) is possible but should not be assumed just because
+# the operator is smarter.
+
+experiment:
+  number: 9
+  description: >
+    exp009 composition-operator test: identical recipe/vocab/data to
+    exp009g (60k vocab, 30% data, 4-layer body, lr=2e-5, MSE), only
+    composition_operator changed from the implicit default ("mean") to the
+    new "kombo_fold" (order-aware sequential fold adapted from KOMBO,
+    arXiv:2604.23948) — a genuinely structural change, not another
+    hyperparameter sweep on the same architecture (per the agreed stopping
+    rule after exp009h/i/j/k all failed to beat exp009g's 0.4065).
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  composition_operator: kombo_fold
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009l_kombo_fold
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009l_kombo_fold
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_kombo_fold

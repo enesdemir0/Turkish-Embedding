@@ -15,7 +15,7 @@
 # GatedRepoError regardless of the token being valid.
 
 # %%
-CONFIG_PATH = "configs/experiments/exp009k_compositional_root_suffix_full_data_lower_lr.yaml"  # <- only thing to change per run
+CONFIG_PATH = "configs/experiments/exp009l_compositional_root_suffix_kombo_fold_smoke.yaml"  # <- only thing to change per run
 
 # %%
 # --- Install dependencies ---
