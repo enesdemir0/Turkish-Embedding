@@ -1,0 +1,80 @@
+# exp009j — same recipe as exp009g (your best result so far: 60k vocab,
+# 4-layer body, learning_rate=2e-5, MSE loss, mean 0.4065), subsample_fraction
+# REMOVED entirely -> trains on the full ~580,000-row distillation dataset
+# instead of 30%.
+#
+# Rationale (discussed directly with the user): the last two levers tried
+# (lower LR, deeper 8-layer body) both underperformed exp009g specifically
+# because they needed MORE training steps than the fixed 30%-data budget
+# (2,719 steps) provided — train_loss for both stayed under-converged/similar
+# to exp009g despite more capacity/gentler updates. More data is the one
+# lever that increases step count without adding anything new that needs
+# extra steps to learn, so it's the safer next test given that pattern.
+#
+# Real timing anchor (not extrapolated from a different architecture): the
+# 30%-data run's training loop alone took ~62 minutes (2,719 steps,
+# 1.37s/it average, exp009c's real logged time). Full data is ~9,062 steps
+# (580,000 / 64) -> estimated ~3.45 hours training alone, plus the usual
+# ~15-30 min fixed overhead (downloads + full 26-task eval). Real estimate:
+# ~3.7-4+ hours total. This is a substantial jump from every prior exp009
+# run and the first real multi-hour commitment in this series -- expect it,
+# don't assume something is stuck if it takes this long.
+#
+# Reuses the exact same 60k vocab as exp009g/h/i -- no new vocab-build
+# pre-step needed if it's still on disk in this Colab session.
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065 (30% data,
+# same everything else).
+#   - >= 0.45 -> user's stated success bar met: a real, meaningful result
+#     worth writing up (roughly 69% of the teacher's official 65.2 mean at
+#     about 1/8th the parameter count).
+#   - Clearly higher than 0.4065 but below 0.45 -> real, genuine progress,
+#     just short of the stated bar -- still worth reporting honestly as
+#     meaningful, not a failure.
+#   - Flat or only marginally higher -> the 30%-data plateau wasn't purely a
+#     step-budget problem; a real ceiling for this specific recipe/vocab/body
+#     combination is more likely, and further scaling (even bigger vocab,
+#     deeper body) would need to happen together, not one variable at a time,
+#     to make more progress from here.
+
+experiment:
+  number: 9
+  description: >
+    exp009 full-data run: same compositional root+suffix model, vocab (60k),
+    body (4 layers), and recipe (learning_rate=2e-5, MSE loss) as exp009g
+    (best result so far, mean 0.4065 at 30% data), subsample_fraction removed
+    entirely to train on the full ~580,000-row distillation dataset. Tests
+    whether the 30%-data plateau was a step-budget limitation (as the lower-LR
+    and deeper-body tests both suggested) or a real ceiling for this recipe.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009j_full_data
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009j_full_data
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_full_data
