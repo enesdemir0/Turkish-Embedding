@@ -1,0 +1,90 @@
+# exp009m — real single-variable comparison of "kombo_fold" WITH the
+# identity/averaging fold_conv init, against both exp009g's 0.4065 ("mean"
+# operator) and exp009l's 0.3339 (kombo_fold, random init — regressed).
+#
+# This is the LAST planned iteration on the composition-operator idea before
+# stopping either way (agreed with the user): if this doesn't beat 0.4065,
+# exp009g stands as the final result for the compositional root+suffix
+# direction, and effort shifts to exp004-series work (see SESSION_NOTES.md
+# "Future work" #2) instead of further exp009 tuning.
+#
+# What changed vs exp009l (same file, same config, no new operator name —
+# `composition_operator: kombo_fold` now always uses this init):
+# `RootSuffixEmbedding.fold_conv` is now initialized to [0.5, 0.5] per-channel
+# weights / zero bias (a plain running average at step 0) instead of default
+# random Kaiming-uniform init. Diagnosis from exp009l's real result
+# (0.3339 vs exp009g's 0.4065, despite train_loss landing close to
+# exp009g's 0.0371): chaining a *randomly* initialized conv up to
+# max_suffixes_per_word (8) times per word compounds noise rather than
+# composing signal. Starting near the already-validated "mean" operator's
+# behavior lets training only need to learn deviations from averaging, not
+# averaging itself. Verified locally (no zeyrek/downloads): fresh module's
+# fold_conv is exactly [0.5, 0.5]/0 bias, and a single-suffix word's output
+# is exactly 0.5*root + 0.5*suffix at init; suffix order still changes the
+# output even under this init (order-awareness preserved). See
+# SESSION_NOTES_EXP009.md for full detail.
+#
+# Byte-identical to exp009g/exp009l otherwise: 60k vocab, 30% data, 4-layer
+# body, lr=2e-5, MSE. Reuses the existing 60k vocab
+# (./vocabs/compositional_root_suffix_60k) — no rebuild needed.
+#
+# Smoke test deliberately SKIPPED for this iteration: the identity init only
+# changes initial weight *values*, not tensor shapes, dtypes, or control
+# flow — exp009l's smoke run already confirmed the fold_conv path runs
+# end-to-end under bf16 with no crash, and that structural path is
+# unchanged here. Going straight to the real comparison.
+#
+# Decision rule (final for this direction): compare mteb_mean_score against
+# exp009g's 0.4065.
+#   - Beats 0.4065 -> real win for the order-aware operator; worth a short
+#     follow-up write-up, and optionally worth trying at 60% or full data
+#     later (separate future decision, not part of this stopping rule).
+#   - Does not beat 0.4065 -> stop here. Two independent structural attempts
+#     (random-init fold, identity-init fold) both failing to beat the
+#     simplest possible operator ("mean") is a real, well-diagnosed signal
+#     that this compute/data budget cannot support order-aware composition
+#     for this architecture — write up exp009g (0.4065) as the final result
+#     for the compositional root+suffix direction and move on.
+
+experiment:
+  number: 9
+  description: >
+    exp009 composition-operator test, final iteration: kombo_fold with an
+    identity/averaging fold_conv init (fixes the compounding-noise problem
+    diagnosed from exp009l's regression), same recipe/vocab/data as exp009g
+    (60k vocab, 30% data, 4-layer body, lr=2e-5, MSE). Last planned attempt
+    on this structural direction before stopping either way.
+
+model_cloning:
+  strategy: compositional_root_suffix
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  roots_path: ./vocabs/compositional_root_suffix_60k/roots.json
+  suffixes_path: ./vocabs/compositional_root_suffix_60k/suffixes.json
+  hidden_dim: 768
+  max_suffixes_per_word: 8
+  composition_operator: kombo_fold
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp009m_kombo_fold_identity_init
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp009m_kombo_fold_identity_init
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_root_suffix_kombo_fold_identity_init

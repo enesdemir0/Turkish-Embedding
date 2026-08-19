@@ -82,7 +82,19 @@ class RootSuffixEmbedding(InputModule):
       once for a fixed 3rd slot. Padded suffix positions carry the running
       state forward unchanged instead of folding, so variable-length chains
       and the zero-suffix degenerate case (state stays exactly the root
-      vector) both fall out without special-casing.
+      vector) both fall out without special-casing. `fold_conv` is
+      initialized to `[0.5, 0.5]` weights / zero bias per channel (a plain
+      running-average pass-through at step 0) rather than left at its
+      default random init — chaining a *randomly* initialized conv up to
+      `max_suffixes_per_word` times per word was confirmed (exp009l) to
+      compound noise rather than compose signal, regressing well below the
+      `"mean"` operator despite fitting the training objective just as well.
+
+    Note on this operator, from a real run: an earlier version of this
+    operator (random `fold_conv` init) scored worse than `"mean"` on the
+    real 30%-data/60k-vocab benchmark (0.3339 vs. exp009g's 0.4065) despite
+    matching train_loss — see `SESSION_NOTES_EXP009.md` for the full
+    diagnosis that led to the identity-style init above.
 
     Sequences are built at the WORD level (whitespace/punctuation split), not
     subword level — a deliberate, structural difference from every other
@@ -155,6 +167,22 @@ class RootSuffixEmbedding(InputModule):
             if composition_operator == "kombo_fold"
             else None
         )
+        if self.fold_conv is not None:
+            # A freshly-initialized (default Kaiming-uniform) conv has no reason to act
+            # as an identity/pass-through — chaining it up to max_suffixes_per_word times
+            # per word compounds that randomness with every fold step, degrading the
+            # accumulated state rather than refining it (confirmed as the real cause of
+            # exp009l's regression vs. exp009g's "mean" operator: train_loss landed close
+            # to exp009g's, but downstream MTEB scores dropped broadly, pointing at a
+            # representational problem, not underfitting — see SESSION_NOTES_EXP009.md).
+            # Initializing each channel's 2-tap kernel to [0.5, 0.5] with zero bias makes
+            # the very first fold step compute a plain running average of state and the
+            # next suffix vector — close in spirit to the already-validated "mean"
+            # operator's behavior — so training starts from a sane, non-destructive point
+            # and only has to learn deviations from averaging, not the averaging itself.
+            with torch.no_grad():
+                self.fold_conv.weight.fill_(0.5)
+                self.fold_conv.bias.zero_()
 
         self._analyzer = analyzer  # lazily created on first preprocess() call if still None
         # zeyrek's rule-based analysis is slow per-word and preprocess() re-segments
