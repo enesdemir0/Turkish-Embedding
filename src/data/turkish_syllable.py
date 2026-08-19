@@ -18,17 +18,31 @@ genuinely different bet, not a strictly-easier version of the same idea —
 see the model_cloning strategy's own docstring for the expected-difficulty
 discussion.
 
-Turkish syllabification rule implemented here (standard, TDK-consistent):
-every syllable contains exactly one vowel. For a run of N consonants between
-two vowels: if N <= 1, the whole run joins the *following* syllable; if
-N >= 2, all but the last consonant stay with the *preceding* syllable, and
-the last consonant joins the following syllable (e.g. "ıspanak" ->
-"ıs-pa-nak": the 2-consonant "sp" cluster splits as "s" staying with "ıs",
-"p" starting "pa"). Leading consonants before the first vowel join the first
-syllable; trailing consonants after the last vowel join the last syllable.
-A word with no vowels at all (digits, punctuation, acronyms, foreign
-fragments) is treated as a single "syllable" (itself), same
-never-raise philosophy as `turkish_morphology.py`'s segment_word().
+Every raw token is first normalized (Turkish-aware lowercase + strip any
+non-Turkish-letter character — see `_normalize_word()`) before
+syllabification. **Added after a real bug, not designed in from the start**:
+without this, a first real Colab run produced 727,154 distinct "syllables"
+from a corpus with only 4,042,857 distinct words — nearly word-scale, not
+the small, reusable inventory Turkish's regular phonology should produce.
+Cause: raw corpus tokens carry punctuation/casing/digits ("kitap," vs
+"kitap." vs "Kitap" vs "kitap123"), each producing a distinct, non-reusable
+syllable string, and Cosmos (a large, noisy, web-scraped corpus) has enough
+long-tail junk like this to nearly double the distinct-string count instead
+of collapsing into Turkish's actually-small set of real syllable shapes.
+See `_normalize_word()`'s own docstring for the full story.
+
+Turkish syllabification rule implemented here (standard, TDK-consistent),
+applied to the normalized string: every syllable contains exactly one
+vowel. For a run of N consonants between two vowels: if N <= 1, the whole
+run joins the *following* syllable; if N >= 2, all but the last consonant
+stay with the *preceding* syllable, and the last consonant joins the
+following syllable (e.g. "ıspanak" -> "ıs-pa-nak": the 2-consonant "sp"
+cluster splits as "s" staying with "ıs", "p" starting "pa"). Leading
+consonants before the first vowel join the first syllable; trailing
+consonants after the last vowel join the last syllable. A token that's all
+non-letters after normalization (pure digits/punctuation/foreign script) is
+treated as a single "syllable" (the original raw token), same never-raise
+philosophy as `turkish_morphology.py`'s segment_word().
 """
 
 from __future__ import annotations
@@ -42,19 +56,62 @@ logger = logging.getLogger(__name__)
 
 UNK_SYLLABLE = "<unk_syllable>"
 
-TURKISH_VOWELS = set("aeıioöuüAEIİOÖUÜ")
+TURKISH_VOWELS = set("aeıioöuü")
+TURKISH_LETTERS = set("abcçdefgğhıijklmnoöprsştuüvyz")
+
+# Turkish-aware case folding — Python's own str.lower() gets this wrong for
+# Turkish's dotted/dotless I distinction: "İ".lower() produces "i̇" (with a
+# stray combining dot, not plain "i"), and "I".lower() produces "i" (should
+# be the dotless "ı"). Both are real, silent corruptions of a word's actual
+# letters if left to the default, confirmed by testing str.lower() directly
+# against "İstanbul"/"İSTANBUL" (produces "i̇stanbul", a different string
+# than the correct "istanbul").
+_TURKISH_CASEFOLD = str.maketrans(
+    {"İ": "i", "I": "ı", "Ç": "ç", "Ğ": "ğ", "Ö": "ö", "Ş": "ş", "Ü": "ü"}
+)
+
+
+def _normalize_word(word: str) -> str:
+    """Lowercases (Turkish-aware) and strips every non-Turkish-letter
+    character (digits, punctuation, foreign-alphabet characters, symbols).
+
+    Added after a real bug found on Colab: without this, `syllabify_word()`
+    operating on raw corpus tokens produced 727,154 distinct "syllables"
+    from a corpus with only 4,042,857 distinct words — nearly word-scale,
+    not the small, reusable syllable inventory Turkish's regular phonology
+    should produce. Root cause: punctuation/casing/digits stuck to raw
+    tokens ("kitap," vs "kitap." vs "Kitap" vs "kitap123") each produced a
+    different, non-reusable syllable string, and Cosmos (a large, noisy,
+    web-scraped corpus) has enough of this long-tail junk to nearly double
+    the distinct-string count instead of collapsing into Turkish's actually
+    small set of real syllable shapes. Normalizing before syllabifying
+    fixes this at the source, for both vocab-building and runtime
+    inference — every caller goes through `syllabify_word()`, so there's a
+    single source of truth, no risk of vocab-build-time and runtime drifting
+    out of sync."""
+    return "".join(ch for ch in word.translate(_TURKISH_CASEFOLD).lower() if ch in TURKISH_LETTERS)
 
 
 def syllabify_word(word: str) -> list[str]:
     """Splits a single word into syllables using the rule described in this
-    module's docstring. Pure string logic, deterministic, never raises —
-    a word with no vowels returns `[word]` unchanged."""
+    module's docstring, after normalizing (Turkish-aware lowercase, strip
+    non-letter characters — see `_normalize_word()`). Pure string logic,
+    deterministic, never raises. A word that's all non-letters after
+    normalization (pure digits/punctuation/foreign script — e.g. a number,
+    a URL fragment) falls back to the original raw word as a single atomic
+    "syllable", same never-raise philosophy as `turkish_morphology.py`'s
+    `segment_word()`. A normalized word with letters but no vowel (e.g. an
+    abbreviation) is likewise returned as a single syllable."""
     if not word:
         return []
 
-    vowel_indices = [i for i, ch in enumerate(word) if ch in TURKISH_VOWELS]
-    if not vowel_indices:
+    normalized = _normalize_word(word)
+    if not normalized:
         return [word]
+
+    vowel_indices = [i for i, ch in enumerate(normalized) if ch in TURKISH_VOWELS]
+    if not vowel_indices:
+        return [normalized]
 
     syllables: list[str] = []
     start = 0
@@ -62,15 +119,15 @@ def syllabify_word(word: str) -> list[str]:
         if pos == len(vowel_indices) - 1:
             # Last vowel: its syllable absorbs everything to the end of the word
             # (trailing consonants included).
-            syllables.append(word[start:])
+            syllables.append(normalized[start:])
             break
         next_vowel_i = vowel_indices[pos + 1]
-        between = word[vowel_i + 1 : next_vowel_i]
+        between = normalized[vowel_i + 1 : next_vowel_i]
         if len(between) <= 1:
             boundary = vowel_i + 1
         else:
             boundary = next_vowel_i - 1
-        syllables.append(word[start:boundary])
+        syllables.append(normalized[start:boundary])
         start = boundary
 
     return syllables
