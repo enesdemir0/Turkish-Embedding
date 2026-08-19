@@ -1,0 +1,84 @@
+# exp010b — real single-variable-family comparison of syllable-based
+# composition against exp009g's 0.4065 (the closed-out best result for the
+# morphology-based approach). Matches exp009g's recipe/data scale as closely
+# as the different vocab type allows: 30% distillation data, 4-layer body,
+# lr=2e-5, MSE loss, mean composition operator (deliberately the ONLY
+# operator tried first — see compositional_syllable.py's module docstring
+# for why, learned directly from exp009l/exp009m's lesson: don't reach for
+# an order-aware operator before the simplest one is validated).
+#
+# Not byte-identical to exp009g the way exp009l/exp009m were to each other —
+# the vocab concept itself is different (a small, closed syllable inventory
+# vs. a capped-at-60k open root vocabulary), so there's no equivalent
+# "max_words: 60000" knob here. Run WITHOUT a cap first (Turkish's syllable
+# inventory is expected to be small enough that capping shouldn't be
+# necessary — see turkish_syllable.py's build_syllable_vocab docstring) and
+# check vocab_stats.json's syllable_vocab_size before trusting this config
+# blindly matches "the same scale" as exp009g.
+#
+# Vocab-build pre-step (same corpus subsample as exp009g's 60k root vocab,
+# 0.001 of Cosmos — reused here for a fair-ish comparison basis, though the
+# resulting vocab TYPE differs):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_syllable import build_syllable_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
+#   build_syllable_vocab('./corpus/cosmos_10pct_vocab.txt', './vocabs/compositional_syllable_30pct')
+#   "
+#
+# Run this ONLY after exp010's smoke config has passed on Colab.
+#
+# Decision rule: compare mteb_mean_score against exp009g's 0.4065 (the
+# closed-out compositional-embedding benchmark) AND against the
+# zero-distillation floor (~0.289) for a sanity check that real learning
+# happened at all.
+#   - Beats 0.4065 -> real win for the syllable-based approach; the deferred
+#     "is this cheaper AND better" question gets a concrete yes.
+#   - Below 0.4065 but clearly above the floor -> real learning happened,
+#     syllables just carry less inherent semantic signal than morphological
+#     roots at this budget (the honestly-flagged risk going in) — a genuine,
+#     informative negative result, not a plumbing failure.
+#   - Near the floor -> something is likely wrong with the composition or
+#     vocab, investigate before concluding anything about the idea itself.
+
+experiment:
+  number: 10
+  description: >
+    exp010 real comparison: syllable-based compositional embedding (mean
+    composition, deliberately the simplest operator first) vs. exp009g's
+    closed-out morphology-based result (0.4065). Same 30% distillation
+    data, 4-layer body, lr=2e-5, MSE recipe. Genuinely open question going
+    in — syllables trade morphological roots' semantic anchoring for
+    deterministic, complete, fast segmentation with no OOV concept.
+
+model_cloning:
+  strategy: compositional_syllable
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  syllables_path: ./vocabs/compositional_syllable_30pct/syllables.json
+  hidden_dim: 768
+  max_syllables_per_word: 6
+  tiny_transformer_config:
+    num_hidden_layers: 4
+    num_attention_heads: 8
+    intermediate_size: 2048
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp010b_syllable_30pct
+    subsample_fraction: 0.3
+    loss_type: mse
+    learning_rate: 2.0e-5
+    batch_size: 64
+    warmup_ratio: 0.1
+
+evaluation:
+  output_folder: results/exp010b_syllable_30pct
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_syllable_30pct

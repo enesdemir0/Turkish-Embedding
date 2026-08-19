@@ -1,0 +1,72 @@
+# exp010 smoke test — cheap-first plumbing check for the new syllable-based
+# compositional embedding (src/model_cloning/compositional_syllable.py), a
+# sibling to exp009's morphology-based compositional_root_suffix but using a
+# different Turkish linguistic unit: syllables (deterministic, rule-based,
+# no zeyrek/analyzer dependency at all) instead of root+suffix chains.
+# Tiny corpus subsample for vocab-building, tiny syllable embedding table,
+# tiny randomly-initialized 2-layer transformer body — same "plumbing check
+# only, not a real result" discipline as every prior smoke test in this
+# project.
+#
+# Vocab-build pre-step (fast — pure string logic, no analyzer, should take
+# well under a minute even at this scale, unlike exp009's zeyrek-bottlenecked
+# smoke-vocab build):
+#   python -c "
+#   from src.data.cosmos_corpus import extract_cosmos_corpus_file
+#   from src.data.turkish_syllable import build_syllable_vocab
+#   extract_cosmos_corpus_file('./corpus/cosmos_smoke.txt', subsample_fraction=0.01)
+#   build_syllable_vocab('./corpus/cosmos_smoke.txt', './vocabs/compositional_syllable_smoke')
+#   "
+#
+# Go/no-go signal before scaling to a real comparison run:
+#   1. vocab-build step completes fast and syllable_vocab_size looks sane
+#      (a few hundred to low thousands, not degenerate)
+#   2. model_cloning.build() completes, returns a real SentenceTransformer,
+#      and save()/reload round-trips (verified locally already — see local
+#      pure-tensor unit checks; must also be confirmed inside distil-trainer's
+#      own internal save/reload path on Colab)
+#   3. distillation runs to completion on the tiny subsample without
+#      exceptions (in particular, bf16 dtype handling — same class of bug
+#      already fixed once for compositional_root_suffix, see
+#      SESSION_NOTES_EXP009.md bug #2 — this module reuses the identical
+#      mask-dtype-cast pattern, but must be confirmed for real, not assumed)
+#   4. evaluation runs to completion (score itself is expected to be
+#      near-random)
+
+experiment:
+  number: 10
+  description: >
+    Cheap-first smoke test of a syllable-based compositional embedding: same
+    "no fixed subword vocabulary, composed at runtime" idea as exp009, but
+    using deterministic Turkish syllabification instead of morphological
+    root+suffix segmentation. Tiny vocab-build corpus subsample, tiny
+    embedding table, tiny distillation subsample — plumbing check only, not
+    a real result.
+
+model_cloning:
+  strategy: compositional_syllable
+  teacher_model: google/embeddinggemma-300m  # distillation teacher only (naming/tagging)
+  syllables_path: ./vocabs/compositional_syllable_smoke/syllables.json
+  hidden_dim: 768
+  max_syllables_per_word: 6
+  tiny_transformer_config:
+    num_hidden_layers: 2
+    num_attention_heads: 2
+    intermediate_size: 128
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: cosine
+  params:
+    output_dir: ./distilled_model/exp010_smoke
+    subsample_fraction: 0.01
+
+evaluation:
+  output_folder: results/exp010_smoke
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_syllable_smoke_test
