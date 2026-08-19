@@ -15,7 +15,7 @@
 # GatedRepoError regardless of the token being valid.
 
 # %%
-CONFIG_PATH = "configs/experiments/exp010_compositional_syllable_smoke.yaml"  # <- only thing to change per run
+CONFIG_PATH = "configs/experiments/exp010c_compositional_syllable_zero_distillation.yaml"  # <- only thing to change per run
 
 # %%
 # --- Install dependencies ---

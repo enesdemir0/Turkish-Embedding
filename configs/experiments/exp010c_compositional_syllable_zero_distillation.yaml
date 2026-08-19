@@ -1,0 +1,67 @@
+# exp010c — zero-distillation ablation for the syllable-based compositional
+# embedding, same methodology as exp003 (src/distillation/skip.py): builds
+# the exact same model as exp010's smoke test (same 3,000-cap syllable
+# vocab, same 2-layer randomly-initialized body), but with ZERO training —
+# distillation.strategy: skip returns the model completely unchanged.
+#
+# Why this exists: exp010's smoke test (real 23 steps of training) scored
+# ~0.41 mean — surprisingly high compared to exp009's own smoke tests at an
+# identical tiny scale (0.3145, 0.2963). Hypothesis: syllables are shared
+# across far more words than exp009's roots were (3,001 syllables vs 16,838
+# roots), so even a completely UNTRAINED mean-of-syllable-vectors
+# composition may already capture a lot of "bag of sub-words" lexical-
+# overlap signal on tasks like STS/retrieval/classification — a known
+# effect, distinct from real learned semantics. This run isolates exactly
+# that: if this zero-training score is ALSO close to ~0.41, the smoke
+# test's score is mostly architectural, not learned. If it's close to
+# exp009's ~0.29 floor instead, the 23 real training steps genuinely did
+# something — a much more promising signal for the real 30% comparison run.
+#
+# Reuses the exact same vocab already built for exp010's smoke test
+# (./vocabs/compositional_syllable_smoke, 3,001 entries, no rebuild
+# needed if that folder still exists in this session — otherwise rebuild
+# with the same command as exp010's smoke config).
+#
+# Decision rule:
+#   - Score near ~0.41 (matches the smoke test) -> confirms the lexical-
+#     overlap hypothesis; the 23 training steps added little to nothing.
+#     Before trusting a future 30%-data result, would need to see it beat
+#     THIS number clearly, not exp009's 0.289 floor.
+#   - Score near exp009's ~0.29 floor -> the smoke test's 0.41 was real
+#     learning, not an architectural artifact. Good signal to proceed to
+#     exp010b (the real 30%-data comparison) with confidence in what the
+#     floor actually is.
+
+experiment:
+  number: 10
+  description: >
+    exp010 zero-distillation ablation (same methodology as exp003): same
+    syllable-composition model/vocab as exp010's smoke test, zero training.
+    Isolates how much of that smoke test's ~0.41 score is architectural
+    (lexical-overlap from a small shared syllable vocab) versus real
+    learning from the 23 training steps.
+
+model_cloning:
+  strategy: compositional_syllable
+  teacher_model: google/embeddinggemma-300m  # naming/tagging only — irrelevant here, no distillation happens
+  syllables_path: ./vocabs/compositional_syllable_smoke/syllables.json
+  hidden_dim: 768
+  max_syllables_per_word: 6
+  tiny_transformer_config:
+    num_hidden_layers: 2
+    num_attention_heads: 2
+    intermediate_size: 128
+  tokenizer_name_or_path: dbmdz/bert-base-turkish-128k-cased
+  pooling_mode: mean
+
+distillation:
+  strategy: skip
+
+evaluation:
+  output_folder: results/exp010c_zero_distillation
+  batch_size: 64
+
+tracking:
+  mlflow_experiment: turkish-embedding
+  tags:
+    purpose: compositional_syllable_zero_distillation
