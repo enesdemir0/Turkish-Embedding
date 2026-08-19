@@ -10,11 +10,19 @@
 # Not byte-identical to exp009g the way exp009l/exp009m were to each other —
 # the vocab concept itself is different (a small, closed syllable inventory
 # vs. a capped-at-60k open root vocabulary), so there's no equivalent
-# "max_words: 60000" knob here. Run WITHOUT a cap first (Turkish's syllable
-# inventory is expected to be small enough that capping shouldn't be
-# necessary — see turkish_syllable.py's build_syllable_vocab docstring) and
-# check vocab_stats.json's syllable_vocab_size before trusting this config
-# blindly matches "the same scale" as exp009g.
+# "max_words: 60000" knob here.
+#
+# max_syllables cap IS REQUIRED — confirmed the hard way on real Colab runs,
+# NOT just a theoretical concern (see turkish_syllable.py's
+# build_syllable_vocab docstring): even after Turkish-aware normalization,
+# a real 1% Cosmos subsample produced 173,715 distinct "syllables" (down
+# from 727,154 pre-normalization, but still nowhere near Turkish's actually-
+# small closed syllable inventory — Cosmos's real non-Turkish/junk long
+# tail survives plain normalization). Capped to the 5,000 most frequent real
+# syllables here — check vocab_stats.json's `syllable_oov_fraction` after
+# building (should land well under exp009g's own 10.5% root-vocab fallback
+# rate, given how much more closed/common Turkish syllables are than roots)
+# before trusting this config actually matches exp009g's scale/quality bar.
 #
 # Vocab-build pre-step (same corpus subsample as exp009g's 60k root vocab,
 # 0.001 of Cosmos — reused here for a fair-ish comparison basis, though the
@@ -23,7 +31,7 @@
 #   from src.data.cosmos_corpus import extract_cosmos_corpus_file
 #   from src.data.turkish_syllable import build_syllable_vocab
 #   extract_cosmos_corpus_file('./corpus/cosmos_10pct_vocab.txt', subsample_fraction=0.001)
-#   build_syllable_vocab('./corpus/cosmos_10pct_vocab.txt', './vocabs/compositional_syllable_30pct')
+#   build_syllable_vocab('./corpus/cosmos_10pct_vocab.txt', './vocabs/compositional_syllable_30pct', max_syllables=5000)
 #   "
 #
 # Run this ONLY after exp010's smoke config has passed on Colab.

@@ -10,12 +10,18 @@
 #
 # Vocab-build pre-step (fast — pure string logic, no analyzer, should take
 # well under a minute even at this scale, unlike exp009's zeyrek-bottlenecked
-# smoke-vocab build):
+# smoke-vocab build). max_syllables IS REQUIRED in practice, not optional —
+# a real Colab run without it produced 727,154 distinct "syllables" (a
+# noisy web corpus like Cosmos contains enough non-Turkish/junk text that
+# normalization alone doesn't collapse it into Turkish's actually-small
+# closed syllable inventory); capped to the 3,000 most frequent real
+# syllables here, same frequency-ranking discipline exp009 needed for its
+# own root vocab:
 #   python -c "
 #   from src.data.cosmos_corpus import extract_cosmos_corpus_file
 #   from src.data.turkish_syllable import build_syllable_vocab
 #   extract_cosmos_corpus_file('./corpus/cosmos_smoke.txt', subsample_fraction=0.01)
-#   build_syllable_vocab('./corpus/cosmos_smoke.txt', './vocabs/compositional_syllable_smoke')
+#   build_syllable_vocab('./corpus/cosmos_smoke.txt', './vocabs/compositional_syllable_smoke', max_syllables=3000)
 #   "
 #
 # Go/no-go signal before scaling to a real comparison run:

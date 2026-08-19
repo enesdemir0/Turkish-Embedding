@@ -146,23 +146,36 @@ def build_syllable_vocab(
       output_dir/syllables.json   — {syllable_string: id}, id 0 reserved for
         <unk_syllable>
       output_dir/vocab_stats.json — word_count, unique_word_count,
-        syllable_vocab_size, avg_syllables_per_word
+        distinct_syllable_count, syllable_vocab_size, syllable_oov_fraction,
+        avg_syllables_per_word
 
-    Unlike build_root_suffix_vocab() in turkish_morphology.py, there is no
-    oov_fallback_count here — syllabification never fails to produce
-    syllables for a real word, so there is no equivalent failure mode to
-    track. No `zeyrek`/analyzer dependency at all, so this runs dramatically
-    faster — pure string processing over however many distinct words the
-    corpus contains, no per-word rule-based-parser cost.
+    `syllabify_word()` itself never fails to produce syllables for a real
+    word (see that function's own never-raise docstring), so unlike
+    build_root_suffix_vocab()'s oov_fallback_count (which tracks whole
+    WORDS zeyrek couldn't analyze at all), there is no equivalent per-word
+    failure mode here. There IS a real coverage concept once `max_syllables`
+    caps the vocab, though — see `syllable_oov_fraction` below. No
+    `zeyrek`/analyzer dependency at all, so this runs dramatically faster —
+    pure string processing over however many distinct words the corpus
+    contains, no per-word rule-based-parser cost.
 
-    max_syllables: optional cap on distinct syllables kept, ranked by real
-    corpus frequency (most_common(), same frequency-ranking discipline as
+    max_syllables: cap on distinct syllables kept, ranked by real corpus
+    frequency (most_common(), same frequency-ranking discipline as
     build_root_suffix_vocab() — see that function's own comment on why
-    insertion-order slicing would be a real bug). Expected to rarely matter
-    in practice: Turkish's syllable inventory is small and closed (a few
-    thousand distinct syllables typically covers the vast majority of real
-    usage), unlike the much larger open root/word vocabularies morphology-
-    or word-level approaches have to cap.
+    insertion-order slicing would be a real bug). **Confirmed necessary in
+    practice, not just theoretical**: a real Colab run without this cap
+    produced 727,154 distinct raw "syllables" (later 173,715 after the
+    normalization fix alone) from a corpus with only 4,042,857 distinct
+    words — Cosmos (a large, noisy, web-scraped corpus) contains enough
+    non-Turkish/foreign/junk text that plain normalization doesn't fully
+    collapse it into Turkish's actually-small closed syllable inventory.
+    Pass an explicit cap (e.g. a few thousand) for any real run; leaving
+    this `None` is only safe for tiny/synthetic corpora. `syllable_oov_fraction`
+    in the returned stats tells you how much real usage (by occurrence
+    count, not distinct-type count) falls outside the cap — check this
+    stays low (Turkish syllables are common enough that a moderate cap
+    should keep it well under the ~10% range exp009's own root-vocab
+    fallback rate landed at) before trusting a capped vocab.
     """
     corpus_path = Path(corpus_path)
     output_dir = Path(output_dir)
@@ -191,12 +204,27 @@ def build_syllable_vocab(
     for syl in kept_syllables:
         syllables[syl] = len(syllables)
 
+    # Fraction of real syllable OCCURRENCES (not distinct syllable types) that fall
+    # outside the kept/capped vocab and would map to <unk_syllable> at train/inference
+    # time — the syllable-level analogue of build_root_suffix_vocab's
+    # oov_fallback_fraction. Real Turkish syllables are common (they dominate the head
+    # of a Zipfian frequency distribution); rare/foreign/junk "syllables" (the reason
+    # a real Colab run needed this cap at all — see this function's own docstring) sit
+    # in the long tail, so a moderate cap should keep this fraction low even while
+    # dropping the vast majority of distinct syllable *types*.
+    kept_set = set(kept_syllables)
+    covered_occurrences = sum(count for syl, count in syllable_counts.items() if syl in kept_set)
+    syllable_oov_fraction = (
+        1.0 - (covered_occurrences / total_syllable_occurrences) if total_syllable_occurrences else 0.0
+    )
+
     unique_word_count = len(word_counts)
     stats = {
         "word_count": sum(word_counts.values()),
         "unique_word_count": unique_word_count,
         "distinct_syllable_count": len(ranked_syllables),
         "syllable_vocab_size": len(syllables),
+        "syllable_oov_fraction": syllable_oov_fraction,
         "avg_syllables_per_word": (
             total_syllable_occurrences / sum(word_counts.values()) if word_counts else 0.0
         ),

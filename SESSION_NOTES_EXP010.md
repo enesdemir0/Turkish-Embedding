@@ -111,10 +111,74 @@ speed/completeness of segmentation (no zeyrek bottleneck, no OOV concept),
 not obviously better final embedding quality. Worth testing because it's
 cheap to find out, not because a win is expected.
 
-## Not yet run
+## Bug found and fixed: uncapped syllable vocab exploded to near-word-scale
 
-Neither the smoke config nor exp010b has been run on Colab yet. Next
-session should run the smoke config first, confirm the go/no-go signals
-(vocab builds fast and looks sane, pipeline runs to completion, no
-crashes), then run exp010b and compare `mteb_mean_score` against exp009g's
-0.4065 and the zero-distillation floor (~0.289).
+First real Colab smoke run (uncapped `build_syllable_vocab`, no
+`max_syllables`): **727,154 distinct "syllables"** from a corpus with only
+4,042,857 distinct words — nearly word-scale, not the small, reusable
+inventory Turkish's regular phonology should produce. `727,154 × 768 ≈
+558M parameters` just for the syllable lookup table — bigger than the
+teacher model (300M), completely defeating the "small, cheap model" point
+of this idea. The smoke run still completed without crashing and even
+scored `mteb_mean_score = 0.40184` — dangerously close to exp009g's real,
+fully-trained result, from only 23 training steps on 1% data. **This score
+was diagnosed as not real signal**: with the syllable table nearly
+one-to-one with distinct words, the "model" was closer to a giant
+per-word lookup table (far more capacity than intended) than a genuine
+small compositional model, so of course a wildly-oversized model can
+partially fit data even in 23 steps — this says nothing about whether the
+syllable-composition idea itself is good.
+
+**Root cause**: `syllabify_word()` operated on raw corpus tokens with no
+normalization — punctuation, casing, and digits stuck to words (`"kitap,"`
+vs `"kitap."` vs `"Kitap"` vs `"kitap123"`) each produced a different,
+non-reusable syllable string. Cosmos (a large, noisy, web-scraped corpus)
+has enough of this long tail to nearly double the distinct-string count.
+
+**Fix, part 1 (normalization)**: added `_normalize_word()` to
+`turkish_syllable.py` — Turkish-aware lowercase (confirmed Python's own
+`str.lower()` is wrong for Turkish: `"İ".lower()` produces a stray
+combining-dot artifact, `"I".lower()` produces `"i"` when it should produce
+dotless `"ı"` — built an explicit translation table instead) plus stripping
+every non-Turkish-letter character. `syllabify_word()` now normalizes
+before segmenting, so vocab-building and runtime inference automatically
+stay in sync (single source of truth, no separate call sites to keep
+consistent). Re-ran on Colab: **727,154 → 173,715** — real, ~4.2x
+reduction, confirms normalization was a genuine part of the problem.
+
+**Fix, part 2 (frequency-ranked capping — the actual fix)**: 173,715 is
+still far too large — normalization alone can't fully separate real Turkish
+syllables from non-Turkish/foreign/junk content that happens to use only
+Turkish-alphabet letters (e.g. an English word sails through the letter
+filter untouched). Rather than chase every possible contamination source
+(endless whack-a-mole), applied the same fix exp009 already needed for its
+own root vocab: frequency-ranked capping via the existing (previously
+unused) `max_syllables` param — real Turkish syllables dominate the head of
+a Zipfian frequency distribution, junk sits in the long tail, so capping to
+the N most frequent syllables cuts the junk without needing perfect text
+cleaning. Also added a new stat, `syllable_oov_fraction` — the syllable-
+level analogue of `build_root_suffix_vocab`'s `oov_fallback_fraction`:
+fraction of real syllable *occurrences* (not distinct types) that fall
+outside the cap. Verified locally (synthetic corpus, exact math check):
+capping to the 2 most frequent syllables in a 2-word corpus correctly
+computes `oov_fraction = 2/22`.
+
+**Configs updated** to pass explicit caps: `exp010`'s smoke config now
+builds with `max_syllables=3000`; `exp010b`'s real-comparison config with
+`max_syllables=5000`. Both configs' header comments document the real
+727,154/173,715 numbers as the reason this is required, not optional.
+
+## Not yet run (again)
+
+The corrected smoke config (now with `max_syllables=3000` and the
+normalization fix) has not been run yet. Next session should:
+1. Run the corrected smoke config, check `syllable_oov_fraction` lands low
+   (real Turkish syllables should be common enough that a 3,000-cap covers
+   the vast majority of occurrences — nowhere near exp009g's 10.5% root
+   fallback rate, given syllables are a smaller/more closed unit than
+   roots) and that `mteb_mean_score` lands back near the ~0.29 floor (a
+   LOW score is what confirms the model is now actually small/sane again —
+   don't mistake a return to the floor for a regression).
+2. If that passes, run exp010b (`max_syllables=5000`, 30% data, matching
+   exp009g's recipe) and compare `mteb_mean_score` against exp009g's 0.4065
+   and the zero-distillation floor (~0.289).
