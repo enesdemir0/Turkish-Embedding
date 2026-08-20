@@ -168,17 +168,81 @@ builds with `max_syllables=3000`; `exp010b`'s real-comparison config with
 `max_syllables=5000`. Both configs' header comments document the real
 727,154/173,715 numbers as the reason this is required, not optional.
 
-## Not yet run (again)
+## Corrected smoke run: passed vocab checks, but the score raised a new,
+more important question than the vocab bug did
 
-The corrected smoke config (now with `max_syllables=3000` and the
-normalization fix) has not been run yet. Next session should:
-1. Run the corrected smoke config, check `syllable_oov_fraction` lands low
-   (real Turkish syllables should be common enough that a 3,000-cap covers
-   the vast majority of occurrences — nowhere near exp009g's 10.5% root
-   fallback rate, given syllables are a smaller/more closed unit than
-   roots) and that `mteb_mean_score` lands back near the ~0.29 floor (a
-   LOW score is what confirms the model is now actually small/sane again —
-   don't mistake a return to the floor for a regression).
-2. If that passes, run exp010b (`max_syllables=5000`, 30% data, matching
-   exp009g's recipe) and compare `mteb_mean_score` against exp009g's 0.4065
-   and the zero-distillation floor (~0.289).
+Ran the corrected smoke config (`max_syllables=3000`, normalization fix
+live): `syllable_vocab_size=3001`, `syllable_oov_fraction=0.0108` (1.08% —
+excellent coverage, well under exp009g's 10.5% root-fallback rate). The
+vocab-size bug is genuinely fixed.
+
+But `mteb_mean_score` landed at **~0.41** — NOT near exp009's ~0.29-0.31
+smoke-test floor (the correct apples-to-apples reference: same 23 steps,
+same 1% data, same 2-layer body). That's a real, unexpected gap worth
+investigating on its own, separate from the vocab-size bug.
+
+## exp010c — zero-distillation ablation (same methodology as exp003):
+the real, final finding
+
+Built `configs/experiments/exp010c_compositional_syllable_zero_distillation.yaml`
+(`distillation.strategy: skip`, same exact model/vocab as the smoke test,
+zero training at all) to isolate how much of that ~0.41 was learned versus
+architectural. **Result: 0.4113 — statistically the same as the trained
+smoke test's ~0.41.** The 23 training steps taught the model essentially
+nothing; the score is coming from the architecture itself.
+
+**Diagnosis**: with only 3,001 syllables shared across millions of words
+(vs. exp009's 16,838 roots, close to one-per-lexical-item), even
+completely untrained mean-of-syllable-vector composition captures a real
+"bag of sub-words" lexical-overlap signal — two sentences sharing common
+words/syllables get similar mean-pooled vectors purely from vocabulary
+overlap, regardless of whether anything was learned. Several MTEB tasks
+(STS, retrieval, some classification) partially reward exactly this kind
+of overlap. This is a known category of effect (a naive averaging baseline
+scoring non-trivially on certain benchmarks without real understanding),
+not a code bug — the vocab, composition math, and training loop are all
+confirmed correct (see local unit tests above and the real, working
+zero-distillation run itself).
+
+**Why this matters, stated plainly**: `0.4113` (zero training) is *higher*
+than exp009g's `0.4065` (the best real, fully-trained result from the
+entire morphology-based track). This means "beating exp009g's number" is
+not a meaningful target for the syllable approach — an untrained model
+already clears it by doing nothing. The real bar for any future syllable-
+based training result would have to be ~0.41-0.42, not 0.4065 — a
+significantly higher, harder bar than originally understood when exp010b
+was designed.
+
+## FINAL STATUS: exp010 concluded — real, negative-but-honest finding,
+not run further
+
+**exp010b (the real 30%-data comparison) was never run.** Given the
+zero-distillation finding, running it would spend the largest remaining
+chunk of a tight 100-Colab-unit budget on a result that couldn't be
+cleanly interpreted as "real learning" even if the raw number looked good —
+the same ambiguity exp008's BERTurk result already taught this project to
+watch for. Decided, discussed directly with the user, not to spend that
+budget chasing it.
+
+**What this session actually produced, for a future session's benefit**:
+- A working, tested Turkish syllabification implementation
+  (`src/data/turkish_syllable.py`) — deterministic, fast, Turkish-aware
+  casefold, correctly handles real-world corpus noise via frequency
+  capping. Reusable for any future idea that needs syllable-level Turkish
+  text processing, independent of this specific compositional-embedding
+  application.
+- A real, well-diagnosed negative result: composing word embeddings from a
+  small, highly-shared unit (syllables) produces a benchmark score that is
+  substantially an artifact of lexical overlap, not learned semantics, at
+  this scale — a genuine, transferable finding about *why* exp009's
+  morphological roots (a much more word-specific unit) were a better
+  choice of decomposition unit than syllables, now confirmed empirically
+  rather than just theoretically predicted.
+- Two real, caught-before-they-cost-real-budget bugs (the uncapped vocab
+  explosion, and the misleading high smoke score) — both caught via cheap
+  diagnostics (a coverage stat, a zero-distillation ablation) before the
+  expensive real run, exactly the cheap-first discipline this project has
+  used throughout.
+
+Not being reopened without an explicit new idea for a different
+composition unit or fix — same treatment as exp009's closure.
